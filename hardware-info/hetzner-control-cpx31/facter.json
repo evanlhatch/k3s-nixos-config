@@ -1,0 +1,38 @@
+{
+  "dmi": {
+    "manufacturer": "Hetzner",
+    "product": {
+      "name": "vServer",
+      "uuid": "cpx31-template"
+    }
+  },
+  "memory": {
+    "system": {
+      "total": "8.00 GiB",
+      "total_bytes": 8589934592
+    }
+  },
+  "processors": {
+    "count": 4,
+    "models": [
+      "Intel(R) CPU (Virtual)"
+    ],
+    "physicalcount": 1
+  },
+  "disks": {
+    "sda": {
+      "model": "QEMU HARDDISK",
+      "size": "160.00 GiB",
+      "size_bytes": 171798691840,
+      "vendor": "QEMU"
+    }
+  },
+  "os": {
+    "name": "Debian",
+    "release": {
+      "full": "12",
+      "major": "12"
+    }
+  },
+  "virtual": "kvm"
+}

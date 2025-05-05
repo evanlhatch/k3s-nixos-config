@@ -1,0 +1,296 @@
+{
+  "disks": {
+    "nvme0n1": {
+      "model": "INTEL SSDPEKKF512G8L",
+      "serial": "BTHP92250FC8512C",
+      "size": "476.94 GiB",
+      "size_bytes": 512110190592,
+      "type": "ssd",
+      "wwn": "eui.5cd2e42691a05007"
+    },
+    "sda": {
+      "model": "SD/MMC CRW",
+      "serial": "28203008282014000",
+      "size": "0 bytes",
+      "size_bytes": 0,
+      "type": "ssd",
+      "vendor": "Generic-"
+    }
+  },
+  "dmi": {
+    "bios": {
+      "release_date": "04/15/2019",
+      "vendor": "LENOVO",
+      "version": "N2EET39W (1.21 )"
+    },
+    "board": {
+      "asset_tag": "Not Available",
+      "manufacturer": "LENOVO",
+      "product": "20MFCTO1WW",
+      "serial_number": "W1KS96C10KN"
+    },
+    "chassis": {
+      "asset_tag": "No Asset Information",
+      "type": "Notebook"
+    },
+    "manufacturer": "LENOVO",
+    "product": {
+      "name": "20MFCTO1WW",
+      "serial_number": "R90VH40R",
+      "uuid": "e74e7bcc-314c-11b2-a85c-9d81c61c20f8",
+      "version": "ThinkPad X1 Extreme"
+    }
+  },
+  "facterversion": "4.10.0",
+  "filesystems": "ext3,ext4,vfat",
+  "fips_enabled": false,
+  "identity": {
+    "gid": 0,
+    "group": "root",
+    "privileged": true,
+    "uid": 0,
+    "user": "root"
+  },
+  "is_virtual": false,
+  "kernel": "Linux",
+  "kernelmajversion": "6.12",
+  "kernelrelease": "6.12.23",
+  "kernelversion": "6.12.23",
+  "load_averages": {
+    "15m": 0.27,
+    "1m": 0.19,
+    "5m": 0.26
+  },
+  "memory": {
+    "system": {
+      "available": "29.48 GiB",
+      "available_bytes": 31650656256,
+      "capacity": "4.31%",
+      "total": "30.80 GiB",
+      "total_bytes": 33076543488,
+      "used": "1.33 GiB",
+      "used_bytes": 1425887232
+    }
+  },
+  "mountpoints": {
+  },
+  "networking": {
+    "domain": "cinnamon-galaxy.ts.net",
+    "fqdn": "thinkpad-nixos.cinnamon-galaxy.ts.net",
+    "hostname": "thinkpad-nixos",
+    "interfaces": {
+      "enp0s31f6": {
+        "duplex": "unknown",
+        "mac": "48:2a:e3:4b:f0:6d",
+        "mtu": 1500,
+        "operational_state": "down",
+        "physical": true,
+        "speed": -1
+      },
+      "enp58s0u2": {
+        "bindings": [
+          {
+            "address": "192.168.86.152",
+            "netmask": "255.255.255.0",
+            "network": "192.168.86.0"
+          }
+        ],
+        "bindings6": [
+          {
+            "address": "fe80::4ee1:73ff:fe42:1c73",
+            "netmask": "ffff:ffff:ffff:ffff::",
+            "network": "fe80::",
+            "scope6": "link",
+            "flags": [
+              "permanent"
+            ]
+          }
+        ],
+        "duplex": "full",
+        "ip": "192.168.86.152",
+        "ip6": "fe80::4ee1:73ff:fe42:1c73",
+        "mac": "4c:e1:73:42:1c:73",
+        "mtu": 1500,
+        "netmask": "255.255.255.0",
+        "netmask6": "ffff:ffff:ffff:ffff::",
+        "network": "192.168.86.0",
+        "network6": "fe80::",
+        "operational_state": "up",
+        "physical": true,
+        "scope6": "link",
+        "speed": 100
+      },
+      "lo": {
+        "bindings": [
+          {
+            "address": "127.0.0.1",
+            "netmask": "255.0.0.0",
+            "network": "127.0.0.0"
+          }
+        ],
+        "bindings6": [
+          {
+            "address": "::1",
+            "netmask": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "network": "::1",
+            "scope6": "host",
+            "flags": [
+              "permanent"
+            ]
+          }
+        ],
+        "ip": "127.0.0.1",
+        "ip6": "::1",
+        "mtu": 65536,
+        "netmask": "255.0.0.0",
+        "netmask6": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "network": "127.0.0.0",
+        "network6": "::1",
+        "operational_state": "unknown",
+        "physical": false,
+        "scope6": "host"
+      },
+      "tailscale0": {
+        "bindings": [
+          {
+            "address": "100.109.40.58",
+            "netmask": "255.255.255.255",
+            "network": "100.109.40.58"
+          }
+        ],
+        "bindings6": [
+          {
+            "address": "fd7a:115c:a1e0::1f01:283a",
+            "netmask": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "network": "fd7a:115c:a1e0::1f01:283a",
+            "scope6": "global",
+            "flags": [
+              "permanent"
+            ]
+          },
+          {
+            "address": "fe80::26d8:52b9:2cc:3359",
+            "netmask": "ffff:ffff:ffff:ffff::",
+            "network": "fe80::",
+            "scope6": "link",
+            "flags": [
+              "permanent"
+            ]
+          }
+        ],
+        "ip": "100.109.40.58",
+        "ip6": "fd7a:115c:a1e0::1f01:283a",
+        "mtu": 1280,
+        "netmask": "255.255.255.255",
+        "netmask6": "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "network": "100.109.40.58",
+        "network6": "fd7a:115c:a1e0::1f01:283a",
+        "operational_state": "unknown",
+        "physical": false,
+        "scope6": "global"
+      }
+    },
+    "ip": "192.168.86.152",
+    "ip6": "fe80::4ee1:73ff:fe42:1c73",
+    "mac": "4c:e1:73:42:1c:73",
+    "mtu": 1500,
+    "netmask": "255.255.255.0",
+    "netmask6": "ffff:ffff:ffff:ffff::",
+    "network": "192.168.86.0",
+    "network6": "fe80::",
+    "primary": "enp58s0u2",
+    "scope6": "link"
+  },
+  "os": {
+    "architecture": "x86_64",
+    "family": "",
+    "hardware": "x86_64",
+    "name": "NixOS",
+    "release": {
+      "full": "25.05",
+      "major": "25.05"
+    },
+    "selinux": {
+      "enabled": false
+    }
+  },
+  "partitions": {
+    "/dev/nvme0n1p1": {
+      "filesystem": "vfat",
+      "label": "boot",
+      "partlabel": "ESP",
+      "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+      "partuuid": "d45fd3b9-227f-408d-bce4-aa36fc0a6c06",
+      "size": "511.00 MiB",
+      "size_bytes": 535822336,
+      "uuid": "12CE-A600"
+    },
+    "/dev/nvme0n1p2": {
+      "filesystem": "ext4",
+      "label": "nixos",
+      "partlabel": "primary",
+      "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+      "partuuid": "fde6a0e3-3475-41df-a47c-645dcb2d4e60",
+      "size": "476.44 GiB",
+      "size_bytes": 511572967424,
+      "uuid": "1e9bf502-7ca7-4c62-ab11-755a31c0724a"
+    }
+  },
+  "path": "/nix/store/d3j42skl3zd2hhnqmw25fxa53lpdz0wl-facter-4.10.0/lib/ruby/gems/3.3.0/bin:/nix/store/9m68vvhnsq5cpkskphgw84ikl9m6wjwp-coreutils-9.5/bin:/nix/store/qjsj5vnbfpbg6r7jhd7znfgmcy0arn8n-gnugrep-3.11/bin:/nix/store/v6q3k3r7l2iqlhlr8hcp0mmmf00p7sdn-net-tools-2.10/bin:/nix/store/qc90xwxs5d4p1sbq5xjbq1i5xxxbkp77-pciutils-3.13.0/bin:/nix/store/zkg6xyvjfyd3g0pzqcp7sij8fi3xnrfx-procps-4.0.4/bin:/nix/store/dvq8sf2z7scj7kdhfjj157nmja6jljj9-util-linux-2.39.4-bin/bin:/nix/store/ya41z732qgn5rqa8q7vh63d3v4k73lwz-iproute2-6.11.0/bin:/nix/store/2lvdmp6j5zjrkpmryxydb0pyshdk9lv1-virt-what-1.27/bin:/nix/store/jlm074w34w1irqbx6kb3m5ma3d7w5njz-zfs-user-2.2.7/bin:/run/wrappers/bin:/root/.nix-profile/bin:/nix/profile/bin:/root/.local/state/nix/profile/bin:/etc/profiles/per-user/root/bin:/nix/var/nix/profiles/default/bin:/run/current-system/sw/bin",
+  "processors": {
+    "cores": 6,
+    "count": 12,
+    "extensions": [
+      "unknown"
+    ],
+    "isa": "unknown",
+    "models": [
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+      "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz"
+    ],
+    "physicalcount": 1,
+    "speed": "3.90 GHz",
+    "threads": 2
+  },
+  "ruby": {
+    "platform": "x86_64-linux",
+    "sitedir": "/nix/store/mrm88gh1xkmqk11bk95kqa0310dmvl9a-ruby-3.3.6/lib/ruby/site_ruby/3.3.0",
+    "version": "3.3.6"
+  },
+  "ssh": {
+    "ed25519": {
+      "fingerprints": {
+        "sha1": "SSHFP 4 1 c9274cf222cd5dfaa12bb1fe286b3c425cae6ffd",
+        "sha256": "SSHFP 4 2 dace44793ea47cab802dd7ed3b36d534db8fd95b954897fb5eb0ba24ff651224"
+      },
+      "key": "AAAAC3NzaC1lZDI1NTE5AAAAIIVEv6yBAs4xhcTPiWcuk8VG6T3It7/IcACM/5oO1Vbh",
+      "type": "ssh-ed25519"
+    },
+    "rsa": {
+      "fingerprints": {
+        "sha1": "SSHFP 1 1 21f876a5acfbf400205efe226e5b4b7d3f4db26f",
+        "sha256": "SSHFP 1 2 59ef71b9f67d9f438d0eff7b59c707922e81b5eafa5092af1bb6d4d09d9e7af7"
+      },
+      "key": "AAAAB3NzaC1yc2EAAAADAQABAAACAQC4OxUitsON84B6lpWYlXVbYIOjjTBCY/889rfSmCznsFotcKZ0KeQMi1qYvm72g0nKjmZFHLSTlLt6W77eDaT5wFilxhHiSs7SFPIE1Y0L/NEYE58cXNKlJwKJsFd3K07IoywCIln5QNqW3NFFJywRnN+1rrfEtiNAW/DA2gkl+hqwwlpB57w/2YswRRI24SWCW2g6iXBIyF6Q9LUVKlXUpiXON1iaB8oUkBxsI+zbBCZSxieBcOtokpqM/FYqJeLxxt3s1EtQOAf1z1ZTRE/bkWvcOomlBPZjY8ovzDLUBg+tKAmSZaWaQRHUl1x4SNeQ90vEPJYuUUFPvn6vGm9M4mT0GoFt/lBB4v5eRmurQS7rgyUn2CwcMuUebyeCmighSoJSkSBlJ4fjeMFGx3SHSMcFmmujyrNUfQ9CWzqfDdlIgsMfCHxhMK4H/IGJhgq90t1SXRvPeKt18vpnZ55vWRznHF3wu9xw7G9vpHEwedsAMvpWLfgIfvpvsxfO7W1X3P/cvjg7wblNT28xdL3O58h/czzdaqS1KzreM1VnOLgO9wCqaIbRLCY1YbrE6HXfexbOnrQSF5uakhXXym9R0aFQqo+3ksMpX15yPGUBlqYue5/2ky2X1uDAwtG28ZwW/5WlWDFEimrys/ZVQ91AuAsL4DdL5KOp6v3+2B1ncw==",
+      "type": "ssh-rsa"
+    }
+  },
+  "system_uptime": {
+    "days": 7,
+    "hours": 172,
+    "seconds": 621960,
+    "uptime": "7 days"
+  },
+  "timezone": "UTC",
+  "virtual": "physical"
+}
