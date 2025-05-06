@@ -1,6 +1,10 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, inputs ? {}, ... }:
 
 {
+  imports = [
+    ../modules/tailscale.nix
+    ../modules/infisical-agent.nix
+  ];
   # System configuration
   boot.tmp.cleanOnBoot = true;
   zramSwap.enable = true;
@@ -30,6 +34,11 @@
     sysstat
     tcpdump
     iptables
+    
+    # K3s and related tools
+    k3s
+    tailscale
+    infisical-cli
     
     # File tools
     file

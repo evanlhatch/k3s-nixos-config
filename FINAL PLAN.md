@@ -10,9 +10,9 @@ This augmented implementation plan builds on the original plan, incorporating sp
 
 3. **Manual Component Integration:** Essential Kubernetes add-ons (Hetzner CCM/CSI, Traefik, Cert-Manager, Harbor, Infisical Operator, SigNoz Collectors, Grafana, Velero, Flagger, Falco, Kyverno, Pixie, etc.) are explicitly installed and configured via Flux definitions in the Flux repo.
 
-4. **Layered Networking:** Hetzner Private Networks provide the primary, efficient substrate for inter-node k3s communication. Tailscale is layered across all nodes via NixOS for secure administrative access, simplified node discovery (using Tailscale DNS), and optional secure service exposure.
+4. **Tailscale-Powered Networking:** Tailscale is used via K3s's built-in integration (--vpn-auth) as the primary mechanism for node-to-node and pod networking, replacing Flannel. This creates a unified, secure network mesh spanning different locations without complex traditional VPNs or peering. Hetzner Private Network may still be used for specific traffic like API server access or node-to-node communication outside the K3s overlay if needed.
 
-5. **Centralized Secrets:** Infisical serves as the primary store for application/service secrets, synced into Kubernetes via the Infisical Operator. sops-nix handles secrets required during the NixOS build or node bootstrap phase (e.g., K3s token, Tailscale auth key).
+5. **Centralized Secrets:** Infisical serves as the primary store for all secrets. For runtime bootstrap secrets (k3s_token, tailscale_authkey) on worker/autoscaled nodes, an embedded Infisical Universal Auth credential bootstraps the Infisical Agent, which then fetches runtime secrets. sops-nix might still be used for control-plane nodes (if configured differently) or secrets needed during the Nix build process, but Infisical Agent is the primary runtime mechanism for agents. Infisical Operator remains for K8s app secrets.
 
 ## Key Implementation Recommendations
 
@@ -25,7 +25,7 @@ Based on the review, the following key recommendations have been incorporated in
 
 ### 2. Environment Variable Management with direnv
 - **Nix-Managed Environment:** Use direnv with `.envrc` and `.env` files instead of `env-vars.sh` for a more Nix-native approach.
-- **HETZNER_PRIVATE_IFACE:** Verify the actual name of the Hetzner private network interface on the VMs (e.g., ens10, eth1) and ensure this variable is correctly set. This is crucial for the `--flannel-iface` flag in `roles/k3s-control.nix`.
+- **HETZNER_PRIVATE_IFACE:** Verify the actual name of the Hetzner private network interface on the VMs (e.g., ens10, eth1) and ensure this variable is correctly set if needed for specific traffic routing.
 - **ADMIN_PUBLIC_IP:** Ensure this is correctly set for the firewall rules.
 - **Non-Secret Variables:** Define in the flake's devShell shellHook.
 - **Secret Variables:** Store in a gitignored `.env` file that is loaded by direnv.
@@ -34,14 +34,15 @@ Based on the review, the following key recommendations have been incorporated in
 - **specialArgs:** Pass node-specific parameters like the control plane IP (`k3sControlPlaneAddr`) via specialArgs when calling makeK3sNode in flake.nix outputs (nixosConfigurations).
 - **Environment Variables:** While using builtins.getEnv within the role module works, specialArgs is generally cleaner Nix practice for node-specific config.
 
-### 4. Sops-Nix Private Key Distribution
-- **Key Distribution:** Implement a concrete plan for securely distributing the private age key (referenced by `sops.age.keyFile = "/var/lib/sops-nix/key.txt"` in secrets.nix) to each node.
-- **Deploy-rs:** Use deploy-rs's secrets feature for secure key distribution.
+### 4. Secret Management Strategy
+- **For Control Plane Nodes:** If using sops-nix with an AGE key, ensure secure key distribution.
+- **For Agent/Worker Nodes:** Use Infisical Agent with embedded Universal Auth credentials to fetch runtime secrets like k3s_token and tailscale_authkey.
+- **Security Trade-off:** The embedded Infisical credentials in the image represent a security trade-off made for automation, particularly for autoscaled nodes.
 
 ### 5. Minor Refinements
 - **Role Selector Logic:** Ensure consistent implementation in roles/*.nix (specifically `services.k3s.enable = ...`) and the selector script in nodes/hetzner-k3s-node/default.nix.
 - **Justfile build-k3s-image:** Add the `--impure` flag to the nix build command if the flake relies on environment variables during evaluation.
-- **Worker Node IP:** Remove the attempt to dynamically determine the worker IP within the Nix evaluation (nodeIpCmd in k3s-worker.nix) as it's fragile. Rely on k3s auto-detection or the `--flannel-iface` flag.
+- **Worker Node IP:** Remove references to --flannel-iface. Add note about needing the k3s --node-external-ip flag (likely set to the node's Tailscale IP/MagicDNS name) and the --vpn-auth-file flag when using Tailscale CNI.
 
 ## Integration with Existing NixOS Configuration
 
@@ -59,11 +60,11 @@ Based on the review, the following key recommendations have been incorporated in
 - [x] Create/update `.envrc` file:
   ```bash
   # /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs/.envrc
-  
+
   # Use the default devShell defined in flake.nix
   # This loads packages and runs the shellHook (setting non-secret vars)
   use flake .
-  
+
   # Source secrets from a gitignored .env file in this directory
   # The file should contain 'export KEY=VALUE' lines for secrets
   # Make sure .env is in your .gitignore!
@@ -75,16 +76,21 @@ Based on the review, the following key recommendations have been incorporated in
   # /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs/.env
   # SECRETS ONLY - Add this file to .gitignore!
   # Use 'export' because we are using direnv's 'source_env'
-  
+
   export AGE_PRIVATE_KEY="AGE-SECRET-KEY-..."
   export HETZNER_API_TOKEN="FrSvv..."
   export GITHUB_TOKEN="ghp_..." # Handle securely if repo public
-  export TAILSCALE_AUTH_KEY="tskey-auth-..." # Needed for sops encrypt step
+  export TAILSCALE_AUTH_KEY="tskey-auth-..." # Needed for storing in Infisical
   export MINIO_SECRET_KEY="minioadmin-secret"
   export INFISICAL_SERVICE_TOKEN="st.xyz..." # Token for Infisical Operator bootstrap secret
   export ATTIC_TOKEN_SIGNING_SECRET="a-very-strong-random-secret-for-attic-tokens" # For Infisical->Attic secret sync
   # Add the generated K3S_TOKEN here after generating it once
   export K3S_TOKEN="generated-k3s-token-value"
+  # Infisical Universal Auth credentials for node bootstrap
+  export INFISICAL_CLIENT_ID="client-id-for-node-bootstrap"
+  export INFISICAL_CLIENT_SECRET="client-secret-for-node-bootstrap"
+  export INFISICAL_ADDRESS="https://your-infisical-instance.example.com" # If self-hosting
+  export TAILSCALE_NODE_TAG="k3s" # If using tags for ACLs
   # Add any other truly sensitive values needed in the environment
   # export SIGNOZ_INGESTION_KEY="xyz..." # Example
   ```
@@ -92,7 +98,7 @@ Based on the review, the following key recommendations have been incorporated in
 - [x] Activate direnv: `direnv allow .`
 - [x] Verify essential variables are loaded:
   ```bash
-  env | grep -E 'ADMIN_USERNAME|ADMIN_SSH_PUBLIC_KEY|ADMIN_PUBLIC_IP|AGE_PRIVATE_KEY|HETZNER_API_TOKEN|HETZNER_SSH_KEY_NAME|HETZNER_LOCATION|HETZNER_PRIVATE_IFACE|PRIVATE_NETWORK_NAME|FIREWALL_NAME|CONTROL_PLANE_VM_TYPE|WORKER_VM_TYPE|K3S_TOKEN|TAILSCALE_AUTH_KEY|NIXOS_STATE_VERSION|GITHUB_TOKEN|FLUX_REPO'
+  env | grep -E 'ADMIN_USERNAME|ADMIN_SSH_PUBLIC_KEY|ADMIN_PUBLIC_IP|AGE_PRIVATE_KEY|HETZNER_API_TOKEN|HETZNER_SSH_KEY_NAME|HETZNER_LOCATION|HETZNER_PRIVATE_IFACE|PRIVATE_NETWORK_NAME|FIREWALL_NAME|CONTROL_PLANE_VM_TYPE|WORKER_VM_TYPE|K3S_TOKEN|TAILSCALE_AUTH_KEY|NIXOS_STATE_VERSION|GITHUB_TOKEN|FLUX_REPO|INFISICAL_CLIENT_ID|INFISICAL_CLIENT_SECRET|INFISICAL_ADDRESS|TAILSCALE_NODE_TAG'
   ```
 
 **Notes:** Completed on 5/5/2025. Environment variables are now properly managed through direnv with non-sensitive variables in flake.nix shellHook and sensitive variables in .env. The redundant env-vars.sh file has been removed.
@@ -152,6 +158,7 @@ fi
   deploy --version
   just --version
   gh --version  # if using GitHub releases
+  infisical-cli --version # for interacting with Infisical during setup
   ```
 
 **Test**: Each command returns a version string without errors.
@@ -169,13 +176,14 @@ fi
 - deploy-rs 1.0
 - just 1.40.0
 - gh 2.72.0
+- infisical-cli 0.15.0
 
 **Implementation Detail**: Install any missing tools using your preferred Nix method (e.g., add to environment.systemPackages in your host's NixOS config, use nix profile install, or use nix-shell -p <tool>):
 
 ```bash
 # Example using nix profile (per-user)
 # nix profile install nixpkgs#sops nixpkgs#age nixpkgs#hcloud nixpkgs#kubectl \
-#   nixpkgs#kubernetes-helm nixpkgs#fluxcd nixpkgs#deploy-rs nixpkgs#just nixpkgs#gh
+#   nixpkgs#kubernetes-helm nixpkgs#fluxcd nixpkgs#deploy-rs nixpkgs#just nixpkgs#gh nixpkgs#infisical-cli
 ```
 
 ## Phase 2: Repository Structure Setup
@@ -205,6 +213,7 @@ mkdir -p ./k3s-cluster/{lib,modules,profiles,roles,locations,hardware-configs,no
 │   │   └── make-k3s-node.nix
 │   ├── modules/
 │   │   ├── tailscale.nix
+│   │   ├── infisical-agent.nix
 │   │   ├── netdata.nix
 │   │   └── disko-*.nix (Optional)
 │   ├── profiles/
@@ -329,9 +338,8 @@ create-hetzner-firewall:
     # K3s HA Etcd Rules (Add now for future readiness)
     hcloud firewall add-rule ${FIREWALL_NAME:-k3s-fw} --direction in --protocol tcp --port 2379 --source-ips 10.0.0.0/16 --description "Etcd Client"
     hcloud firewall add-rule ${FIREWALL_NAME:-k3s-fw} --direction in --protocol tcp --port 2380 --source-ips 10.0.0.0/16 --description "Etcd Peer"
-    # CNI Rules (Flannel Default - Adjust for Cilium later)
-    hcloud firewall add-rule ${FIREWALL_NAME:-k3s-fw} --direction in --protocol udp --port 51820 --source-ips 10.0.0.0/16 --description "Flannel WireGuard"
-    hcloud firewall add-rule ${FIREWALL_NAME:-k3s-fw} --direction in --protocol udp --port 8472 --source-ips 10.0.0.0/16 --description "Flannel VXLAN (Fallback)"
+    # Tailscale Rules
+    hcloud firewall add-rule ${FIREWALL_NAME:-k3s-fw} --direction in --protocol udp --port 41641 --source-ips 0.0.0.0/0 --description "Tailscale"
     # Ingress Rules (Allow from ANY initially, restrict later if needed)
     # Or restrict to Tailscale IPs if using Tailscale Funnel primarily
     hcloud firewall add-rule ${FIREWALL_NAME:-k3s-fw} --direction in --protocol tcp --port 80 --source-ips 0.0.0.0/0 --description "Traefik HTTP"
@@ -433,7 +441,7 @@ in
     tmux
     jq
   ];
-  
+
   nixpkgs.config.allowUnfree = true;
 }
 ```
@@ -486,7 +494,7 @@ let
   # Combine all configurations
   combinedConfig = {
     networking.hostName = hostname;
-    
+
     # Pass special arguments to modules
     _module.args = {
       inherit k3sControlPlaneAddr k3sToken tailscaleAuthKey;
@@ -500,7 +508,7 @@ in
   # Return a NixOS system configuration
   nixosSystem = lib.nixosSystem {
     inherit system;
-    
+
     modules = [
       commonConfig
       baseServerConfig
@@ -778,7 +786,7 @@ create-worker-node number="1" pool="static-workers" type="{{ WORKER_VM_TYPE:-cpx
 # Get the kubeconfig from the control plane node
 get-kubeconfig:
     #!/usr/bin/env bash
-    CONTROL_IP=$(hcloud server ip hetzner-control-01)
+    CONTROL_IP=$(tailscale ip hetzner-control-01)
     ssh ${ADMIN_USERNAME:-nixos}@$CONTROL_IP "sudo cat /etc/rancher/k3s/k3s.yaml" | \
       sed "s/127.0.0.1/$CONTROL_IP/g" > ~/.kube/config.k3s # Save locally
     chmod 600 ~/.kube/config.k3s
@@ -898,24 +906,83 @@ tailscale.nix:
 Nix
 
 # ./k3s-cluster/modules/tailscale.nix
-# (Code from your Plan - Phase 3.3)
+# Major Update: This module now just ensures the Tailscale package is installed
+# K3s will manage the Tailscale connection via --vpn-auth flag
 { config, lib, pkgs, ... }: {
-  services.tailscale = {
-    enable = true;
-    package = pkgs.tailscale;
-    # Use sops-nix to provide the auth key securely
-    authKeyFile = config.sops.secrets.tailscale_authkey.path;
-    # Allow node to act as subnet router or exit node if needed later
-    useRoutingFeatures = "both";
-  };
+  # Just install the Tailscale package
+  environment.systemPackages = [ pkgs.tailscale ];
+  
   # Allow Tailscale traffic through NixOS firewall
   networking.firewall = {
     trustedInterfaces = [ "tailscale0" ];
     allowedUDPPorts = [ 41641 ];
   };
-  # Define the sops secret structure needed by this module
-  sops.secrets.tailscale_authkey = {
-    # Assumes secrets.yaml is one level up from ./modules directory
+  
+  # Note: We no longer need to configure services.tailscale.enable = true
+  # or authKeyFile via sops-nix, as K3s manages Tailscale connection
+}
+
+# ./k3s-cluster/modules/infisical-agent.nix
+# New module for Infisical Agent configuration
+{ config, lib, pkgs, ... }: {
+  # Install the Infisical CLI
+  environment.systemPackages = [ pkgs.infisical-cli ];
+  
+  # Create directories for Infisical configuration and secrets
+  systemd.tmpfiles.rules = [
+    "d /etc/infisical 0755 root root - -"
+    "d /run/infisical-secrets 0750 root root - -"
+  ];
+  
+  # Store the Universal Auth credentials in the filesystem
+  # These are embedded in the image for autoscaled nodes
+  environment.etc = {
+    "infisical/client-id" = {
+      text = builtins.getEnv "INFISICAL_CLIENT_ID";
+      mode = "0400";
+    };
+    "infisical/client-secret" = {
+      text = builtins.getEnv "INFISICAL_CLIENT_SECRET";
+      mode = "0400";
+    };
+    "infisical/agent.yaml" = {
+      text = ''
+        auth:
+          universal:
+            client_id_file: /etc/infisical/client-id
+            client_secret_file: /etc/infisical/client-secret
+        
+        address: ${builtins.getEnv "INFISICAL_ADDRESS" or "https://app.infisical.com"}
+        
+        secrets:
+          - path: /k3s-cluster/bootstrap
+            destination:
+              path: /run/infisical-secrets
+              templates:
+                - source: k3s_token
+                  destination: k3s_token
+                  permissions: 0400
+                - source: tailscale_join_key
+                  destination: tailscale_join_key
+                  permissions: 0400
+      '';
+      mode = "0400";
+    };
+  };
+  
+  # Create a systemd service for the Infisical Agent
+  systemd.services.infisical-agent = {
+    description = "Infisical Agent for Secret Management";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "k3s.service" "k3s-agent.service" ];
+    
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${pkgs.infisical-cli}/bin/infisical secrets pull --config /etc/infisical/agent.yaml";
+    };
+  };
+}
     sopsFile = ../secrets/secrets.yaml;
     owner = config.users.users.tailscaled.user; # Run as tailscaled user
     group = config.users.users.tailscaled.group;
@@ -952,7 +1019,7 @@ Test: Parse individual module files.
   boot.tmp.cleanOnBoot = true;
   zramSwap.enable = true;
   networking.firewall.enable = true;
-  
+
   # Set up nix
   nix = {
     settings = {
@@ -977,24 +1044,24 @@ Test: Parse individual module files.
     sysstat
     tcpdump
     iptables
-    
+
     # File tools
     file
     tree
     ncdu
     ripgrep
     fd
-    
+
     # Network tools
     inetutils
     mtr
     nmap
     socat
-    
+
     # Process management
     psmisc
     procps
-    
+
     # Text processing
     jq
     yq
@@ -1002,7 +1069,7 @@ Test: Parse individual module files.
 
   # Default editor
   environment.variables.EDITOR = "vim";
-  
+
   # SSH hardening
   services.openssh = {
     settings = {
@@ -1013,14 +1080,14 @@ Test: Parse individual module files.
       MaxAuthTries = 3;
     };
   };
-  
+
   # Security hardening
   security = {
     sudo.wheelNeedsPassword = false;
     auditd.enable = true;
     audit.enable = true;
   };
-  
+
   # Networking
   networking = {
     useDHCP = false;
@@ -1030,22 +1097,22 @@ Test: Parse individual module files.
       logReversePathDrops = true;
     };
   };
-  
+
   # Enable systemd-networkd
   systemd.network.enable = true;
-  
+
   # Time synchronization
   services.timesyncd.enable = true;
-  
+
   # Disable sound
   sound.enable = false;
-  
+
   # Disable X11
   services.xserver.enable = false;
-  
+
   # Disable printing
   services.printing.enable = false;
-  
+
   # Disable bluetooth
   hardware.bluetooth.enable = false;
 }
@@ -1064,6 +1131,7 @@ Nix
   imports = [
     ../common.nix
     ../modules/tailscale.nix
+    ../modules/infisical-agent.nix
     ../modules/netdata.nix
     # Import the main sops-nix module to enable secret management
     inputs.sops-nix.nixosModules.sops
@@ -1088,6 +1156,8 @@ Nix
   environment.systemPackages = with pkgs; [
      htop vim git curl wget mtr netdata # Common utils
      k3s # Include k3s binary itself
+     tailscale # Include tailscale binary for K3s integration
+     infisical-cli # Include infisical-cli for secret management
   ];
 
   # Nix settings
@@ -1131,7 +1201,10 @@ in {
       "--node-ip=${controlPlaneIp}"
       "--advertise-address=${controlPlaneIp}"
       "--bind-address=0.0.0.0" # Listen on all interfaces for LB/external access
-      "--flannel-iface=${privateInterface}"
+      "--node-external-ip=$(tailscale ip -4)" # Use Tailscale IP for external access
+      "--vpn-auth-file=/run/infisical-secrets/tailscale_join_key" # Use Tailscale for networking
+      "--flannel-backend=none" # Disable Flannel as we're using Tailscale
+      "--disable-network-policy" # Network policies handled by Tailscale ACLs
       "--kubelet-arg=cloud-provider=external"
       "--disable-cloud-controller"
       "--disable=servicelb,traefik" # Disable defaults we install manually
@@ -1144,12 +1217,13 @@ in {
     # };
   };
 
-  # Define the k3s token secret for sops-nix
+  # For control plane, we can still use sops-nix for the k3s token
+  # Worker nodes will use Infisical Agent instead
   sops.secrets.k3s_token = { sopsFile = ../secrets/secrets.yaml; owner = "root"; group = "root"; mode = "0400"; };
 
   # Firewall rules for control plane
   networking.firewall.allowedTCPPorts = [ 6443 2379 2380 ]; # K8s API, etcd client, etcd peer
-  networking.firewall.allowedUDPPorts = [ ]; # Flannel handled by worker rules or separate module
+  networking.firewall.allowedUDPPorts = [ 41641 ]; # Tailscale
 
   # Add essential client tools
   environment.systemPackages = with pkgs; [ kubectl kubernetes-helm fluxcd ];
@@ -1178,24 +1252,31 @@ in {
   services.k3s = {
     enable = false; # Let role-selector handle enabling
     role = "agent";
-    serverAddr = "https://${specialArgs.k3sControlPlaneAddr}:6443";
-    tokenFile = config.sops.secrets.k3s_token.path;
+    # Use Tailscale DNS name for control plane connection
+    serverAddr = "https://hetzner-control-01:6443";
+    # Use Infisical Agent rendered token file
+    tokenFile = "/run/infisical-secrets/k3s_token";
     extraFlags = toString [
-      # Let k3s auto-detect the node IP based on the interface
-      # Using the same HETZNER_PRIVATE_IFACE variable as in k3s-control.nix
-      "--flannel-iface=${privateInterface}" # Ensure CNI uses private net
+      # Use Tailscale IP for external access
+      "--node-external-ip=$(tailscale ip -4)"
+      # Use Tailscale for networking
+      "--vpn-auth-file=/run/infisical-secrets/tailscale_join_key"
+      # Disable Flannel as we're using Tailscale
+      "--flannel-backend=none"
+      # Network policies handled by Tailscale ACLs
+      "--disable-network-policy"
       "--kubelet-arg=cloud-provider=external"
       # Add node labels here if consistent across all workers of this type
       # "--node-label=topology.kubernetes.io/zone=us-east-1a" # Example
     ];
   };
 
-  # Define the k3s token secret for sops-nix
-  sops.secrets.k3s_token = { sopsFile = ../secrets/secrets.yaml; owner = "root"; group = "root"; mode = "0400"; };
+  # Worker nodes use Infisical Agent for secrets
+  # No need for sops-nix token definition
 
   # Worker firewall rules
   networking.firewall.allowedTCPPorts = [ 10250 ]; # Kubelet
-  networking.firewall.allowedUDPPorts = [ 8472 51820 ]; # Flannel VXLAN / WireGuard
+  networking.firewall.allowedUDPPorts = [ 41641 ]; # Tailscale
 
   # Add kubectl for debugging
   environment.systemPackages = with pkgs; [ kubectl ];
@@ -1217,11 +1298,11 @@ Implementation Detail:
     useDHCP = false;
     useNetworkd = true;
   };
-  
+
   # Configure systemd-networkd for Hetzner Cloud
   systemd.network = {
     enable = true;
-    
+
     # Public network interface (typically eth0)
     networks."10-eth0" = {
       name = "eth0";
@@ -1232,7 +1313,7 @@ Implementation Detail:
       };
       linkConfig.RequiredForOnline = "no";
     };
-    
+
     # Private network interface (typically ens10)
     networks."20-ens10" = {
       name = "ens10";
@@ -1243,7 +1324,7 @@ Implementation Detail:
       linkConfig.RequiredForOnline = "no";
     };
   };
-  
+
   # Enable cloud-init for Hetzner Cloud
   services.cloud-init = {
     enable = true;
@@ -1265,7 +1346,7 @@ Implementation Detail:
   imports = [
     "${toString pkgs.path}/nixos/modules/profiles/qemu-guest.nix"
   ];
-  
+
   # Hetzner Cloud specific kernel modules
   boot.kernelModules = [
     "virtio_pci"
@@ -1274,7 +1355,7 @@ Implementation Detail:
     "ata_piix"
     "uhci_hcd"
   ];
-  
+
   # Hetzner Cloud specific boot settings
   boot.loader.grub = {
     enable = true;
@@ -1296,17 +1377,17 @@ Implementation Detail:
     useDHCP = false;
     networkmanager.enable = true;
   };
-  
+
   # Enable firmware updates
   hardware.enableRedistributableFirmware = true;
-  
+
   # Enable all firmware
   hardware.enableAllFirmware = true;
-  
+
   # Enable CPU microcode updates
   hardware.cpu.intel.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
   hardware.cpu.amd.updateMicrocode = lib.mkDefault config.hardware.enableRedistributableFirmware;
-  
+
   # Set timezone to local timezone (override in hardware-configuration.nix if needed)
   time.timeZone = lib.mkDefault "America/Denver";
 }
@@ -1335,6 +1416,8 @@ Nix
     # Import BOTH role modules - the selector service will enable the correct one
     ../../roles/k3s-control.nix
     ../../roles/k3s-worker.nix
+    # Import Infisical Agent module
+    ../../modules/infisical-agent.nix
   ];
 
   # Generic hostname for the image itself (will be overridden by cloud-init/actual server name)
@@ -1348,9 +1431,11 @@ Nix
     description = "Select k3s role based on cloud-init data (/etc/nixos/k3s_role)";
     wantedBy = [ "multi-user.target" ];
     # Run after cloud-init finishes and network is up
-    after = [ "network-online.target" "cloud-final.service" ];
+    after = [ "network-online.target" "cloud-final.service" "infisical-agent.service" ];
     # Ensure k3s services are defined before this tries to enable them
     requires = [ "k3s.service" "k3s-agent.service" ];
+    # Wait for Infisical Agent to fetch secrets
+    wants = [ "infisical-agent.service" ];
 
     serviceConfig = {
       Type = "oneshot";
@@ -1392,12 +1477,12 @@ Implementation Detail:
     # Need sops module if installer uses secrets (e.g., Tailscale)
     # inputs.sops-nix.nixosModules.sops  # Uncomment when inputs are properly passed
   ];
-  
+
   environment.systemPackages = with pkgs; [
     git vim curl wget parted gptfdisk disko k3s
     nixos-install-tools htop tmux jq yq iotop lsof tcpdump iptables
   ];
-  
+
   services.openssh.enable = true; # Enable SSH daemon
   services.openssh.settings.PermitRootLogin = "yes"; # Allow root login via SSH key
   users.users.root.initialPassword = ""; # Disable root password login
@@ -1431,309 +1516,94 @@ Implementation Detail: Ensure your main /home/evan/nixos/flake.nix integrates th
 
 **Test**: Successfully ran `nix flake check` to verify the configuration.
 Test: cd /home/evan/nixos && nix flake check . and nix flake show ..
-Phase 4: Secrets Management (NixOS Bootstrap Secrets)
-[x] 4.1: Set Up Sops Configuration (./k3s-cluster/.sops.yaml) ✅
+## Phase 4: Bootstrap Secret Management (Infisical Agent)
 
-Context: Configures sops to use your age key for encrypting secrets specific to the k3s NixOS configuration.
-Implementation Detail:
-```yaml
-# ./k3s-cluster/.sops.yaml
-keys:
-  - &admin age1p5vdpde60kwfjqeyufvp8xxtfk4ja39h42v4y26u8ju85ysw9y4qvuh0cd # Using the AGE_PUBLIC_KEY from .env
-creation_rules:
-  - path_regex: secrets/secrets\.yaml$
-    key_groups:
-      - age:
-        - *admin
-```
+Context: This phase configures the Infisical Agent for runtime secret management on nodes, particularly for autoscaled worker nodes. This replaces the previous approach of using sops-nix for bootstrap secrets like k3s_token and tailscale_authkey.
 
-**Notes:** Completed on 5/5/2025. Created the sops configuration file with the age public key from the environment.
+[ ] 4.1: Create Infisical Machine Identity & Universal Auth Credentials
 
-**Test**: File exists and is valid YAML.
-[x] 4.2: Create Secrets File (./k3s-cluster/secrets/secrets.yaml) ✅
-
-Context: This file will hold secrets needed by NixOS during build or bootstrap, encrypted with sops. K8s secrets (like Hetzner token for CCM/CSI, Harbor creds, app secrets) should generally be managed via Infisical or encrypted directly in the Flux repo.
-Implementation Detail:
-```yaml
-# ./k3s-cluster/secrets/secrets.yaml
-# Add secrets needed by NixOS modules (imported via secrets.nix)
-k3s_token: ENC[AES256_GCM,data:kpj9vye9XRG!uqp!qed,iv:...,tag:...,type:str] # Placeholder for encrypted token
-tailscale_authkey: ENC[AES256_GCM,data:tskey-auth-k79RePZdFw11CNTRL-GUy5wGgfqwVeXwvock6MxVr2rTNzHP5p,iv:...,tag:...,type:str] # Placeholder for encrypted key
-# Add other NixOS-level secrets here if needed
-
-sops:
-    kms: []
-    gcp_kms: []
-    azure_kv: []
-    hc_vault: []
-    age:
-        - recipient: age1p5vdpde60kwfjqeyufvp8xxtfk4ja39h42v4y26u8ju85ysw9y4qvuh0cd
-          enc: |
-            -----BEGIN AGE ENCRYPTED FILE-----
-            ...
-            -----END AGE ENCRYPTED FILE-----
-    lastmodified: "2025-05-05T19:58:00Z"
-    mac: ENC[AES256_GCM,data:...,iv:...,tag:...,type:str]
-    pgp: []
-    unencrypted_suffix: _unencrypted
-    version: 3.8.1
-```
-
-**Notes:** Completed on 5/5/2025. Created the secrets file with placeholders for the encrypted secrets. In a real deployment, you would use `sops -e -i k3s-cluster/secrets/secrets.yaml` to encrypt the actual secrets.
-
-**Test**: File exists and is valid YAML.
-Test: File exists.
-[ ] 4.3: Encrypt K3s Token
-
-Context: Encrypt the $K3S_TOKEN for use via sops-nix tokenFile.
-Implementation Detail:
-Bash
-
-# Run from /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs directory
-# Ensure secrets file exists with placeholders
-export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt # Or wherever your key is
-sops --set '["k3s_token"] "'"$K3S_TOKEN"'"' ./k3s-cluster/secrets/secrets.yaml > ./k3s-cluster/secrets/secrets.yaml.new && \
-  mv ./k3s-cluster/secrets/secrets.yaml.new ./k3s-cluster/secrets/secrets.yaml
-Test: sops -d ./k3s-cluster/secrets/secrets.yaml | grep k3s_token shows the decrypted token.
-[ ] 4.4: Encrypt Tailscale Auth Key
-
-Context: Encrypt the $TAILSCALE_AUTH_KEY for use via sops-nix authKeyFile.
-Implementation Detail:
-Bash
-
-# Run from /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs directory
-export SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt
-sops --set '["tailscale_authkey"] "'"$TAILSCALE_AUTH_KEY"'"' ./k3s-cluster/secrets/secrets.yaml > ./k3s-cluster/secrets/secrets.yaml.new && \
-  mv ./k3s-cluster/secrets/secrets.yaml.new ./k3s-cluster/secrets/secrets.yaml
-Test: sops -d ./k3s-cluster/secrets/secrets.yaml | grep tailscale_authkey.
-[ ] 4.5: Encrypt Hetzner API Token
-
-Decision: Deferring this. The $HETZNER_TOKEN is primarily needed by Kubernetes components (CCM, CSI, CA), not NixOS itself. We will handle this secret within the Flux repository (encrypted via sops there) or potentially sync it via Infisical later.
-[x] 4.6: Configure Sops-Nix Integration (./k3s-cluster/secrets.nix) ✅
-
-Context: Tells NixOS modules how to access the decrypted secrets provided by sops-nix during evaluation/activation. Requires the age private key to be present on the target node at /var/lib/sops-nix/key.txt. Securely distributing this private key to nodes is critical and non-trivial. Options include baking it into a private image build (less secure), using deploy-rs secrets deployment feature, or another secure bootstrap mechanism.
-Implementation Detail:
-```nix
-# ./k3s-cluster/secrets.nix
-{ config, lib, pkgs, ... }: {
-  sops = {
-    # IMPORTANT: Ensure the agent key is present on the target system at this path!
-    age.keyFile = "/var/lib/sops-nix/key.txt";
-    # Use SSH host key as identity? Requires setup.
-    # age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
-    defaultSopsFile = ./secrets/secrets.yaml; # Relative to this file's location
-    secrets = {
-      k3s_token = {
-         # Needed by roles/k3s-control.nix and roles/k3s-worker.nix
-         owner = config.users.users.root.name; # k3s service runs as root
-         group = config.users.groups.root.name;
-         mode = "0400"; # Readable only by root
-       };
-      tailscale_authkey = {
-         # Needed by modules/tailscale.nix
-         owner = "root"; # Tailscale service typically runs as root
-         group = "root";
-         mode = "0400";
-       };
-      # Add other NixOS-level secrets here if defined in secrets.yaml
-    };
-  };
-  # Ensure the key directory exists with correct permissions
-  systemd.tmpfiles.rules = [
-     "d /var/lib/sops-nix 0700 root root - -"
-   ];
-}
-```
-
-**Notes:** Completed on 5/5/2025. Created the secrets.nix file that configures sops-nix integration. Modified the tailscale_authkey owner/group to use "root" directly instead of config.users.users.tailscaled.user since we haven't defined a tailscale module yet.
-
-**Test**: `nix-instantiate --parse ./k3s-cluster/secrets.nix` confirms the syntax is valid. Runtime test requires the private key to be present on the node.
-
-Phase 4: Secrets Management (NixOS Bootstrap Secrets)
-Context: This phase configures sops and sops-nix to manage secrets required during the NixOS node build or bootstrap process. These typically include the shared K3s token and the Tailscale pre-authentication key. Secrets needed by Kubernetes applications (like API keys, database passwords, Hetzner token for K8s controllers) will be managed later via Infisical and its Kubernetes Operator (Phase 9).
-
-[ ] 4.1: Set Up Sops Configuration
-
-Context: Creates the .sops.yaml file within the ./k3s-cluster/ directory to configure SOPS specifically for the secrets used by the NixOS cluster configuration. It specifies your age public key (from $ADMIN_AGE_PUBLIC_KEY) as the recipient for encryption.
-Implementation Detail: Create the file ./k3s-cluster/.sops.yaml:
-YAML
-
-# /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs/k3s-cluster/.sops.yaml
-keys:
-  # Uses the age public key defined in flake's devShell shellHook (ensure it's correct!)
-  - &admin ${ADMIN_AGE_PUBLIC_KEY:-age1p5vdpde60kwfjqeyufvp8xxtfk4ja39h42v4y26u8ju85ysw9y4qvuh0cd}
-creation_rules:
-  # Rule to automatically encrypt only the secrets.yaml file in the secrets/ subdir
-  - path_regex: secrets/secrets\.yaml$
-    key_groups:
-      - age:
-        - *admin
-Test: Verify file ./k3s-cluster/.sops.yaml exists and its content is valid YAML.
-[ ] 4.2: Create Secrets File
-
-Context: Creates the ./k3s-cluster/secrets/secrets.yaml file. This file will store the actual NixOS bootstrap secrets (key-value pairs) in an encrypted format. Initially, create it with placeholders.
-Implementation Detail: Create the file with initial structure:
-YAML
-
-# /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs/k3s-cluster/secrets/secrets.yaml
-# Secrets needed during NixOS build/bootstrap phase ONLY
-k3s_token: ENC[...] # Placeholder, encrypted in next step
-tailscale_authkey: ENC[...] # Placeholder, encrypted in step 4.4
-# Do NOT add K8s application secrets or Hetzner API token here.
-sops:
-  # SOPS metadata will be automatically generated/updated upon encryption.
-  lastmodified: '...'
-  mac: '...'
-  version: '...'
-  encrypted_regex: ^(data|stringData)$ # Default SOPS encryption pattern
-  age: [] # Will be populated with recipient details on first encryption
-Test: Verify file ./k3s-cluster/secrets/secrets.yaml exists and its content is valid YAML.
-[ ] 4.3: Encrypt K3s Token
-
-**Context**: Encrypts the K3s cluster join token ($K3S_TOKEN from .env) into the secrets.yaml file. This encrypted token will be accessed by the sops-nix module on nodes to configure the services.k3s.tokenFile. Ensure your age private key is available (e.g., via SOPS_AGE_KEY_FILE environment variable pointing to ~/.config/sops/age/keys.txt, or the key being present in that default location).
-
-**Implementation Detail**: Use the sops CLI to add/update and encrypt the token:
-Bash
-
-# Run from NixOS Config Repo root: /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs
-# Ensure K3S_TOKEN is exported via direnv from .env
-# Ensure SOPS_AGE_KEY_FILE is set or private key is in ~/.config/sops/age/keys.txt
-echo "Encrypting K3S_TOKEN into ./k3s-cluster/secrets/secrets.yaml..."
-sops --set '["k3s_token"] "'"$K3S_TOKEN"'"' ./k3s-cluster/secrets/secrets.yaml > ./k3s-cluster/secrets/secrets.yaml.new && \
-  mv ./k3s-cluster/secrets/secrets.yaml.new ./k3s-cluster/secrets/secrets.yaml
-echo "K3S_TOKEN encrypted."
-Test: Verify encryption using sops -d ./k3s-cluster/secrets/secrets.yaml | grep k3s_token. Commit the encrypted secrets.yaml to Git.
-[ ] 4.4: Encrypt Tailscale Auth Key
-
-**Context**: Encrypts the Tailscale authentication key ($TAILSCALE_AUTH_KEY from .env) into secrets.yaml. This allows nodes to automatically join your Tailnet on first boot via the sops-nix module configuring services.tailscale.authKeyFile. Use a reusable auth key from your Tailscale admin console, or generate an ephemeral key if preferred (nodes using ephemeral keys will be automatically removed after a period of inactivity).
+**Context**: Create a dedicated, least-privilege Infisical Machine Identity and Universal Auth credentials specifically for node bootstrap. These credentials will be embedded in the NixOS image.
 
 **Implementation Detail**:
-Bash
-
-# Run from NixOS Config Repo root
-# Ensure TAILSCALE_AUTH_KEY is exported via direnv from .env
-# Ensure SOPS_AGE_KEY_FILE is set or private key is available
-echo "Encrypting TAILSCALE_AUTH_KEY into ./k3s-cluster/secrets/secrets.yaml..."
-sops --set '["tailscale_authkey"] "'"$TAILSCALE_AUTH_KEY"'"' ./k3s-cluster/secrets/secrets.yaml > ./k3s-cluster/secrets/secrets.yaml.new && \
-  mv ./k3s-cluster/secrets/secrets.yaml.new ./k3s-cluster/secrets/secrets.yaml
-echo "TAILSCALE_AUTH_KEY encrypted."
-Test: Verify encryption using sops -d ./k3s-cluster/secrets/secrets.yaml | grep tailscale_authkey. Commit the encrypted secrets.yaml to Git.
-[ ] 4.5: Encrypt Hetzner API Token
-
-Context & Decision: The Hetzner API token ($HETZNER_TOKEN) is primarily needed by Kubernetes controllers deployed via Flux (CCM, CSI, Cluster Autoscaler). While it could be encrypted here, the best practice for K8s secrets is to manage them within the K8s ecosystem.
-Implementation Detail: Deferring encryption. We will create a standard Kubernetes Secret containing this token directly within the Flux repository in Phase 9.1 (encrypting that manifest file with sops) or sync it from Infisical if preferred. Do not add $HETZNER_TOKEN to the NixOS ./k3s-cluster/secrets/secrets.yaml file.
-[ ] 4.6: Configure Sops-Nix Integration
-
-Context: This NixOS module (./k3s-cluster/secrets.nix) configures the sops-nix service on each node. It tells sops-nix where the encrypted secrets file is located within the Nix store (derived from defaultSopsFile) and, crucially, where to find the node's private age key (age.keyFile) for decryption during system activation. It defines which secrets from the file should be decrypted and placed into /run/secrets/ with specific ownership and permissions for consumption by other NixOS services (k3s, tailscale).
-Security Warning: Securely distributing the private age key specified by sops.age.keyFile (e.g., /var/lib/sops-nix/key.txt) to each node is critical and outside the scope of sops-nix itself. Options include baking it into a truly private image build (less ideal), using deploy-rs's secret deployment feature, leveraging cloud-init securely, or manual placement during initial setup. Failure to provide the correct private key will prevent sops-nix from decrypting secrets, breaking services that depend on them.
-Implementation Detail: Create ./k3s-cluster/secrets.nix:
-Nix
-
-# ./k3s-cluster/secrets.nix
-{ config, lib, pkgs, ... }:
-{
-  sops = {
-    # Path on the TARGET NODE where the PRIVATE age key is expected.
-    # Ensure this key is securely provisioned!
-    age.keyFile = "/var/lib/sops-nix/key.txt";
-    # Alternative: Use SSH host key as identity (requires matching sops encryption rule)
-    # age.sshKeyPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
-
-    # Path to the encrypted secrets file, relative to this .nix file
-    defaultSopsFile = ./secrets/secrets.yaml;
-
-    # Define which secrets from the YAML file are needed by NixOS services
-    secrets = {
-      # Makes 'k3s_token' available at /run/secrets/k3s_token
-      k3s_token = {
-        # Needed by services.k3s in roles/{k3s-control.nix, k3s-worker.nix}
-        owner = config.users.users.root.name; # k3s runs as root
-        group = config.users.groups.root.name;
-        mode = "0400"; # Read-only by root
-      };
-      # Makes 'tailscale_authkey' available at /run/secrets/tailscale_authkey
-      tailscale_authkey = {
-        # Needed by services.tailscale in modules/tailscale.nix
-        owner = config.users.users.tailscaled.user; # Needs to be readable by tailscaled user
-        group = config.users.users.tailscaled.group;
-        mode = "0400"; # Read-only by tailscaled
-      };
-      # Add other secrets needed by NixOS modules here if they exist in secrets.yaml
-    };
-  };
-
-  # Ensure the directory for the private age key exists with tight permissions
-  # The key itself must be placed here by other means (e.g., deploy-rs).
-  systemd.tmpfiles.rules = [
-    "d /var/lib/sops-nix 0700 root root - -"
-  ];
-}
-Test: Verify file syntax with nix-instantiate --parse ./k3s-cluster/secrets.nix. Runtime functionality relies on the private key existing at /var/lib/sops-nix/key.txt on the deployed nodes.
-
-[ ] 4.7: Configure Deploy-rs for Private Key Distribution
-
-Context: As recommended in the review, deploy-rs should be used to securely distribute the private age key to each node. This ensures the key is never stored in the Nix store and is securely transferred to the target nodes.
-
-Implementation Detail: Add the following to your flake.nix to configure deploy-rs:
-
-```nix
-# In flake.nix, within the outputs section
-deploy.nodes = {
-  "hetzner-control-01" = {
-    hostname = "hetzner-control-01";
-    profiles.system = {
-      user = "root";
-      path = deploy-rs.lib.${system}.activate.nixos self.nixosConfigurations.hetzner-control-01;
-      # Configure sops-nix private key deployment
-      sshUser = "nixos"; # or ${ADMIN_USERNAME}
-      secrets = {
-        "sops-key" = {
-          # Local path to the private key
-          local = "${builtins.getEnv "HOME"}/.config/sops/age/keys.txt";
-          # Remote path where the key should be placed
-          remote = "/var/lib/sops-nix/key.txt";
-          # Permissions for the key file
-          permissions = "0400";
-          # User and group that should own the key file
-          user = "root";
-          group = "root";
-        };
-      };
-    };
-  };
-  
-  # Similar configuration for worker nodes
-  "hetzner-worker-static-01" = {
-    hostname = "hetzner-worker-static-01";
-    profiles.system = {
-      user = "root";
-      path = deploy-rs.lib.${system}.activate.nixos self.nixosConfigurations.hetzner-worker-static-01;
-      sshUser = "nixos"; # or ${ADMIN_USERNAME}
-      secrets = {
-        "sops-key" = {
-          local = "${builtins.getEnv "HOME"}/.config/sops/age/keys.txt";
-          remote = "/var/lib/sops-nix/key.txt";
-          permissions = "0400";
-          user = "root";
-          group = "root";
-        };
-      };
-    };
-  };
-  
-  # Add more nodes as needed
-};
-```
-
-Usage: After adding this configuration to your flake.nix, you can deploy the configuration and the private key to a node using:
+1. Log in to your Infisical instance (cloud or self-hosted)
+2. Navigate to Project Settings > Machine Identities
+3. Create a new Machine Identity named "k3s-node-bootstrap"
+4. Set appropriate permissions (read-only access to specific secrets)
+5. Generate Universal Auth credentials (Client ID and Client Secret)
+6. Add these credentials to your .env file:
 
 ```bash
-deploy .#hetzner-control-01
+# Add to /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs/.env
+export INFISICAL_CLIENT_ID="your-client-id"
+export INFISICAL_CLIENT_SECRET="your-client-secret"
+export INFISICAL_ADDRESS="https://your-infisical-instance.example.com" # If self-hosting
 ```
 
-This will securely copy the private key to the target node and then deploy the NixOS configuration. The key will be placed at /var/lib/sops-nix/key.txt with the correct permissions, allowing sops-nix to decrypt the secrets during system activation.
+**Test**: Verify the credentials work by using the Infisical CLI:
+```bash
+infisical login universal --client-id $INFISICAL_CLIENT_ID --client-secret $INFISICAL_CLIENT_SECRET
+infisical secrets list
+```
 
-Test: Verify the configuration with `nix flake check` and test the deployment with `deploy .#hetzner-control-01 --dry-run`.
+[ ] 4.2: Store K3S_CLUSTER_TOKEN and TAILSCALE_AUTH_KEY in Infisical
+
+**Context**: Store the runtime secrets that nodes need to bootstrap in Infisical. These will be fetched by the Infisical Agent on node startup.
+
+**Implementation Detail**:
+1. Log in to your Infisical instance
+2. Navigate to the appropriate project and environment
+3. Create a new secret path `/k3s-cluster/bootstrap`
+4. Add the following secrets:
+   - `k3s_token`: Value from your K3S_TOKEN environment variable
+   - `tailscale_join_key`: Value from your TAILSCALE_AUTH_KEY environment variable
+
+**Test**: Verify the secrets are accessible with the machine identity credentials:
+```bash
+infisical login universal --client-id $INFISICAL_CLIENT_ID --client-secret $INFISICAL_CLIENT_SECRET
+infisical secrets get -p /k3s-cluster/bootstrap -e production k3s_token
+infisical secrets get -p /k3s-cluster/bootstrap -e production tailscale_join_key
+```
+
+[ ] 4.3: Configure NixOS Image with Infisical Agent
+
+**Context**: Configure the NixOS image to include the Infisical Agent, embed the Universal Auth credentials, and set up the agent to fetch secrets on boot.
+
+**Implementation Detail**: This is handled by the infisical-agent.nix module we created earlier, which:
+1. Installs the Infisical CLI
+2. Creates directories for configuration and secrets
+3. Embeds the Universal Auth credentials in the filesystem
+4. Configures the agent to fetch secrets from Infisical
+5. Creates a systemd service to run the agent on boot
+
+**Test**: Build a test image and verify the Infisical Agent configuration is included:
+```bash
+nix build .#hetznerK3sNodeImage --impure
+```
+
+[ ] 4.4: Configure Control Plane Nodes (Optional)
+
+**Context**: For control plane nodes, you may still want to use sops-nix for secret management, as they are typically not autoscaled and may have different security requirements.
+
+**Implementation Detail**: If you choose to use sops-nix for control plane nodes:
+1. Keep the sops-nix configuration in the control plane role
+2. Use deploy-rs to securely distribute the private key to control plane nodes
+3. Ensure the control plane role imports the secrets.nix module
+
+**Test**: Deploy to a control plane node and verify secrets are properly decrypted:
+```bash
+deploy .#hetzner-control-01
+ssh nixos@hetzner-control-01 "sudo cat /run/secrets/k3s_token"
+```
+
+[ ] 4.5: Defer Hetzner API Token Management
+
+**Context**: The Hetzner API token is primarily needed by Kubernetes components (CCM, CSI, Cluster Autoscaler), not by NixOS itself.
+
+**Implementation Detail**: We will handle this secret within the Kubernetes ecosystem:
+1. Create a Kubernetes Secret in the Flux repository (encrypted with SOPS)
+2. Or sync it from Infisical using the Infisical Operator
+
+**Test**: This will be tested in Phase 9 when deploying the Hetzner CCM and CSI.
 
 Phase 5: Hetzner Infrastructure Setup
 Context: This phase uses the hcloud CLI (likely via just commands) to create the necessary cloud resources in your Hetzner project before provisioning nodes.
@@ -1790,340 +1660,143 @@ Test: hcloud placement-group list shows the group.
 Phase 6: Build and Upload Hetzner Image
 Context: This phase builds the generic NixOS node image using your flake configuration and uploads it for use by Hetzner Cloud. Leverage CI/CD (GitHub Actions) for automation.
 
-[ ] 6.1: Build Hetzner Image
+Okay, let's integrate the nix build approach with automatic versioning, compression, direct hcloud upload, and just orchestration into a revised Phase 6 for your implementation guide.
 
-Context: Compiles the k3s-node-cloud-builder NixOS configuration defined in your flake.nix into a raw disk image (result/disk.raw). This image is generic and relies on cloud-init user-data for role specification.
+Phase 6: Build, Compress & Register NixOS Image via just
 
-Implementation Detail: Use one of these approaches:
+Context: (Current as of: Monday, May 5, 2025 at 11:56:42 PM MDT) This phase details the automated process for creating your custom NixOS worker node image locally using nix build, compressing it, and registering it directly with Hetzner Cloud. We will use just as the command runner to orchestrate these steps and automatically generate versioned image names based on the timestamp and Git commit hash. This replaces previous methods involving Packer or manual uploads via URLs. This assumes you are building an image designed for autoscaling, incorporating the Infisical Agent and embedded credentials as previously discussed.
 
+[ ] 6.1: Define Justfile Recipes
 
+Context: Add the necessary recipes to your /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs/justfile. These recipes define the build, compress, and register actions, orchestrated by a main workflow recipe that handles automatic versioning.
 
-**Option 1: Direct Nix build (original approach)**
+Implementation Detail: Add or merge the following recipes into your justfile. Ensure the variables at the top (IMAGE_BASENAME, FLAKE_OUTPUT_NAME, LOCAL_RAW_IMAGE_LINK) are set correctly for your project.
 
-```bash
+Code snippet
 
-# Run from NixOS Config Repo root
+# === Image Building (Add/Merge into your Justfile) ===
 
-cd /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs
+# --- Variables ---
+# Base name for the image
+export IMAGE_BASENAME := "nixos-k3s-worker"
+# Flake output package name defining the image build
+export FLAKE_OUTPUT_NAME := "autoscaled-worker-image" # Adjust if your flake output is named differently
+# Local nix build output link name (temporary)
+export LOCAL_RAW_IMAGE_LINK := "./result-worker-image"
 
-echo "Building Hetzner K3s Node Image (Flake Output: hetznerK3sNodeImage)..."
+# --- Core Recipes ---
 
-just build-k3s-image # Uses --option substituters https://cache.nixos.org to avoid Cachix issues
+# Build the raw disk image using Nix
+_build-image flake_output out_link:
+    echo "Building NixOS image: .#{{flake_output}}"
+    # Add --impure if required by your flake
+    # Add --option flags for substituters/trusted-keys if not globally configured or using direnv/nix-direnv
+    nix build .#{{flake_output}} --out-link {{out_link}} --accept-flake-config --extra-experimental-features "nix-command flakes"
 
-```
+# Compress the raw image using zstd
+_compress-image raw_link compressed_path:
+    echo "Finding raw image in {{raw_link}}..."
+    # Use find within shell - safer for paths potentially containing spaces etc.
+    RAW_IMAGE_PATH := shell('find "{{raw_link}}" -name "*.raw" -print -quit')
+    if [ -z "{{RAW_IMAGE_PATH}}" ]; then echo "Error: Raw image not found in {{raw_link}}!" >&2; exit 1; fi
+    echo "Compressing {{RAW_IMAGE_PATH}} to {{compressed_path}}..."
+    zstd --rm -T0 "{{RAW_IMAGE_PATH}}" -o "{{compressed_path}}" # -T0 uses all cores, --rm removes original .raw
+    echo "Compressed image created:"
+    ls -lh "{{compressed_path}}"
 
+# Register image in Hetzner directly from compressed file
+_register-image-file image_name compressed_path:
+    # Check if repo is dirty (optional, add '-dirty' suffix if needed)
+    # IS_DIRTY := shell_output('if git diff --quiet && git diff --cached --quiet; then echo ""; else echo "-dirty"; fi')
+    GIT_HASH := shell("git rev-parse --short HEAD")
+    VERSION_LABEL := "git-g{{GIT_HASH}}" # + IS_DIRTY
 
+    echo "Registering Hetzner image '{{image_name}}' from file: {{compressed_path}}"
+    hcloud image create \
+        --name "{{image_name}}" \
+        --type snapshot \
+        --from-file "{{compressed_path}}" \
+        --label os=nixos \
+        --label purpose=k3s-worker \
+        --label version="{{VERSION_LABEL}}" # Add Git hash label
 
-**Option 2: Packer-based build and upload (recommended)**
+# --- Main Workflow Recipe ---
 
-```bash
+# Build, Compress, and Register via Direct File Upload with AUTO VERSIONING
+# Usage: just build-and-register [FLAKE_OUTPUT_NAME] [IMAGE_BASENAME]
+build-and-register flake_output=FLAKE_OUTPUT_NAME base_name=IMAGE_BASENAME:
+    # 1. Generate Versioned Name (YYYYMMDD + Git Hash)
+    TIMESTAMP := shell("date +%Y%m%d")
+    GIT_HASH  := shell("git rev-parse --short HEAD")
+    _image_name := base_name + "-" + TIMESTAMP + "-g" + GIT_HASH
+    echo "Generated Image Name: {{_image_name}}"
 
-# Run from NixOS Config Repo root
+    # 2. Define compressed file path using the generated name
+    _compressed_path := "./" + _image_name + ".raw.zst"
 
-cd /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs
+    # 3. Run the steps, passing dynamic names/paths
+    # Ensure required env vars (like HETZNER_API_TOKEN) are loaded via direnv/.env
+    just _build-image flake_output=flake_output out_link=LOCAL_RAW_IMAGE_LINK
+    just _compress-image raw_link=LOCAL_RAW_IMAGE_LINK compressed_path=_compressed_path
+    just _register-image-file image_name=_image_name compressed_path=_compressed_path
 
-echo "Building and uploading Hetzner K3s Node Image using Packer..."
+    # 4. Output final name for user
+    echo ""
+    echo "--------------------------------------------------------------------"
+    echo "Successfully registered Hetzner image: {{_image_name}}"
+    echo "Verify status is 'available' via 'hcloud image list'"
+    echo "Update Cluster Autoscaler / Deployment config to use this image name."
+    echo "--------------------------------------------------------------------"
 
-just build-k3s-image-packer
+Test: Run just --list in the repo root directory and verify the new recipes (_build-image, _compress-image, _register-image-file, build-and-register) appear.
 
-```
+[ ] 6.2: Ensure Prerequisites
 
+Context: Verify your local development environment and Nix configuration are ready before building.
+Implementation Detail: Check the following:
+You are in the correct directory: cd /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs
+Your direnv environment is active (run echo $HETZNER_API_TOKEN - should not be empty if loaded from .env).
+Required tools are available (check nix --version, just --version, hcloud --version, zstd --version, git --version). These should be provided by your flake's devShell activated by direnv.
+Your NixOS flake configuration for the image (.#{{FLAKE_OUTPUT_NAME}}) is complete and correct (includes Infisical agent setup, embedded credentials, etc.). Run nix flake check . to catch basic errors.
+Your Git working directory is clean (git status) - recommended since the commit hash is used in the image name. Commit any pending changes.
+Test: Confirm tools are present and environment variables (like HETZNER_API_TOKEN) are loaded. nix flake check . passes.
+[ ] 6.3: Execute the Build & Register Workflow
 
-
-The Packer approach offers several advantages:
-
-- Builds the NixOS image locally using your flake configuration
-
-- Automatically uploads the image to Hetzner Cloud as a snapshot
-
-- Adds appropriate labels for easy identification
-
-- Handles the entire process in one command
-
-
-
-Test: For direct build, check that result/disk.raw exists. For Packer approach, verify the snapshot appears in Hetzner Cloud Console.
-[ ] 6.2: Compress Image
-
-Context: Compresses the raw disk image using zstd for faster uploads/downloads.
-
-Implementation Detail: This step is only needed for the direct Nix build approach. The Packer approach handles compression automatically.
-
-
-
-**Only needed for Option 1 (Direct Nix build):**
-
-```bash
-
-# Run from NixOS Config Repo root
-
-cd /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs
-
-echo "Compressing image artifact..."
-
-just compress-k3s-image # Runs: zstd result/disk.raw -o hetzner-k3s-image.zst
-
-```
-
-
-
-Test: ls -lh hetzner-k3s-image.zst exists.
-[ ] 6.3: Upload Image
-
-Context: Host the compressed image (hetzner-k3s-image.zst) publicly via HTTPS. GitHub Releases is used in the example. Critical: Hetzner requires a direct, non-redirecting download URL. GitHub release asset URLs sometimes don't work directly; test thoroughly or consider using public S3/B2/etc.
-Implementation Detail (Example using GitHub CLI - adapt for CI):
+Context: Run the primary just command to build the image locally, compress it, upload it directly to Hetzner, and register it.
+Implementation Detail: Execute the main workflow recipe.
 Bash
 
 # Run from NixOS Config Repo root
-cd /home/evan/2_Dev/2.1_Homelab/\!k3s-nixos-configs
-TAG_NAME="k3s-image-$(date +%Y%m%d-%H%M%S)"
-# Use GITHUB_USER and FLUX_REPO (or a dedicated NixOS repo variable)
-GITHUB_REPO_FULL="${GITHUB_USER}/${FLUX_REPO}"
-echo "Creating GitHub release $TAG_NAME in $GITHUB_REPO_FULL..."
-gh release create "$TAG_NAME" --repo "$GITHUB_REPO_FULL" \
-    --notes "NixOS K3s image build for Hetzner - ${TAG_NAME}" \
-    ./hetzner-k3s-image.zst # Upload artifact with release creation
-echo "Verifying direct download URL..."
-# Attempt to construct or retrieve the direct download URL (VERIFY THIS MANUALLY!)
-# IMAGE_DOWNLOAD_URL=$(gh release view "$TAG_NAME" --repo "$GITHUB_REPO_FULL" --json assets --jq '.assets[] | select(.name=="hetzner-k3s-image.zst") | .url') # This might be browser URL
-IMAGE_DOWNLOAD_URL="https://github.com/$GITHUB_REPO_FULL/releases/download/$TAG_NAME/hetzner-k3s-image.zst" # More likely direct URL structure
-echo "Potential Direct Download URL: $IMAGE_DOWNLOAD_URL"
-if curl --output /dev/null --silent --head --fail -L "$IMAGE_DOWNLOAD_URL"; then
-  echo "URL appears directly downloadable via curl."
-  export IMAGE_DOWNLOAD_URL="$IMAGE_DOWNLOAD_URL"
-else
-  echo "ERROR: URL $IMAGE_DOWNLOAD_URL may NOT be directly downloadable by Hetzner. Check URL or use alternative storage." >&2
-  # exit 1 # Fail the process if URL seems invalid
-fi
-Test: Manually verify the generated ${IMAGE_DOWNLOAD_URL} works with curl -L -o test.zst <URL>.
-[ ] 6.4: Register Image in Hetzner
+# Uses default FLAKE_OUTPUT_NAME and IMAGE_BASENAME from Justfile vars
+just build-and-register
 
-Context: Instructs Hetzner Cloud to download the image from ${IMAGE_DOWNLOAD_URL}, decompress it, and make it available as a custom image named ${HETZNER_IMAGE_NAME} for server creation.
-Implementation Detail: Use the just command with the verified URL:
+# OR override variables if needed:
+# just build-and-register FLAKE_OUTPUT_NAME="my-special-image-output" IMAGE_BASENAME="special-worker"
+Note: This process can take a significant amount of time, especially the nix build (if uncached) and the hcloud image create --from-file upload step. Monitor the output.
+Test: The command should run through all steps (build, compress, register) without errors. The final output should clearly state the generated image name (e.g., nixos-k3s-worker-20250505-gabcdef0).
+[ ] 6.4: Verify Image in Hetzner Cloud
+
+Context: After just finishes, confirm the image was successfully created and is ready to use in Hetzner Cloud.
+Implementation Detail: Use the hcloud CLI. Filter using the base name or labels.
 Bash
 
-# Run from NixOS Config Repo root
-cd /home/evan/2_Dev/2.1_Homelab/\!k3s-nixos-configs
-if [ -z "$IMAGE_DOWNLOAD_URL" ]; then echo "Error: IMAGE_DOWNLOAD_URL not set/exported from previous step." >&2; exit 1; fi
-echo "Registering image '${HETZNER_IMAGE_NAME:-my-k3s-image-v1}' in Hetzner from URL..."
-# The just command runs: hcloud image create --name ... --url ...
-just register-k3s-image "$IMAGE_DOWNLOAD_URL"
-Test: hcloud image list | grep "${HETZNER_IMAGE_NAME:-my-k3s-image-v1}". Wait for status available. Update ${HETZNER_IMAGE_NAME} in your flake's devShell shellHook if you used a versioned name like my-k3s-image-${TAG_NAME}.
-Phase 7: Node Provisioning
-Context: Create the Hetzner VMs using the registered NixOS image, attaching cloud resources, applying labels, and passing cloud-init user-data to define the node's role (control or worker).
+# List recent images, filtering by label or name pattern
+hcloud image list --sort created:desc --selector os=nixos
+# OR check specifically by the name outputted by the just command:
+# hcloud image describe nixos-k3s-worker-20250505-gabcdef0
+Test: Verify the image with the automatically generated name exists. Check its Status. It will initially be creating; wait until it becomes available. Confirm the labels (os, purpose, version) are correct.
+[ ] 6.5: Update Cluster Autoscaler / Node Templates
 
-[ ] 7.1: Provision Control Plane Node (hetzner-control-01)
-
-Context: Creates the initial master node using the parameters exported via direnv and the create-control-node just recipe. Applies labels k8s-cluster=${K3S_CLUSTER_NAME} and k8s-nodepool=control-plane. Passes cloud-init data to write /etc/nixos/k3s_role with control.
-Implementation Detail: Use the just command:
-Bash
-
-# Run from NixOS Config Repo root
-cd /home/evan/2_Dev/2.1_Homelab/\!k3s-nixos-configs
-echo "Provisioning control plane node 'hetzner-control-01'..."
-just create-control-node
-Test: hcloud server list --selector k8s-nodepool=control-plane. Server status becomes running. hcloud server describe hetzner-control-01 shows correct image, type, labels, network, firewall.
-[ ] 7.2: Wait for Control Plane Node to Boot
-
-Context: Allow time for the VM boot, cloud-init script execution (writing role file), NixOS activation (reading role file, enabling correct k3s service via selector), network setup (including Tailscale).
-Implementation Detail: Use SSH check loop:
-Bash
-
-# Run from local machine
-CONTROL_NODE_NAME="hetzner-control-01"
-CONTROL_NODE_IP=$(hcloud server ip $CONTROL_NODE_NAME)
-ADMIN_USER=${ADMIN_USERNAME:-nixos}
-echo "Waiting for $CONTROL_NODE_NAME ($CONTROL_NODE_IP) SSH..."
-until ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 $ADMIN_USER@$CONTROL_NODE_IP exit; do
-  sleep 5 && echo -n ".";
-done; echo " SSH OK."
-# Optional: Check Tailscale status (e.g., ping Tailscale IP)
-# ssh $ADMIN_USER@$CONTROL_NODE_IP "tailscale status"
-Test: Successful SSH login.
-[ ] 7.3: Verify K3s Server is Running
-
-Context: Confirm the k3s-role-selector service ran successfully, enabled k3s.service, and the node registered itself with the Kubernetes API. Fetch the admin kubeconfig.
+Context: The final step is to tell your cluster provisioning mechanism (Cluster Autoscaler for autoscaled nodes) to use this new, versioned image.
 Implementation Detail:
-Bash
+Copy the exact image name generated by the just build-and-register command (e.g., nixos-k3s-worker-20250505-gabcdef0).
+Edit the configuration for your Cluster Autoscaler (likely the HelmRelease values in your Flux repository under clusters/hetzner/infrastructure/).
+Find the relevant node group definition for your autoscaled workers and update the image parameter to this new name.
+Commit and push the changes to your Flux repository.
+Test: Monitor Flux applying the configuration change (flux get kustomizations, flux logs ...). Observe the Cluster Autoscaler logs (kubectl logs -n kube-system -l app.kubernetes.io/name=cluster-autoscaler -f) to ensure it recognizes the new image configuration. Future scaling events should now use the updated image.
 
-# Run from local machine
-CONTROL_IP=$(hcloud server ip hetzner-control-01)
-ADMIN_USER=${ADMIN_USERNAME:-nixos}
-echo "Verifying k3s server on $CONTROL_NODE_NAME..."
-# Check role selector log
-ssh $ADMIN_USER@$CONTROL_IP "sudo journalctl -u k3s-role-selector --no-pager -n 20"
-# Check k3s service status
-ssh $ADMIN_USER@$CONTROL_IP "sudo systemctl status k3s.service"
-echo "Waiting for K3s API readiness on node..."
-until ssh $ADMIN_USER@$CONTROL_IP "sudo kubectl get node $CONTROL_NODE_NAME --kubeconfig /etc/rancher/k3s/k3s.yaml" &>/dev/null; do sleep 5 && echo -n "."; done; echo " API OK."
-echo "Fetching kubeconfig..."
-cd /home/evan/2_Dev/2.1_Homelab/\!k3s-nixos-configs
-just get-kubeconfig # Saves to ~/.kube/config.k3s
-export KUBECONFIG=~/.kube/config.k3s
-echo "Verifying node $CONTROL_NODE_NAME Ready status via kubectl..."
-kubectl wait --for=condition=Ready node/$CONTROL_NODE_NAME --timeout=5m
-Test: Role selector log shows "Configuring as k3s control plane". systemctl status k3s.service is active/running. kubectl get node hetzner-control-01 shows Ready.
-[ ] 7.4: Note Control Plane Private IP
 
-Context: Double-check the assigned Hetzner private IP against the address configured in NixOS (k3sCommonSpecialArgs.k3sControlPlaneAddr). They must match for workers to connect.
-Implementation Detail:
-Bash
 
-# Run from local machine
-HCLOUD_PRIVATE_IP=$(hcloud server describe hetzner-control-01 -o json | jq -r '.private_net[0].ip')
-CONFIG_PRIVATE_IP=${K3S_CONTROL_PLANE_ADDR:-10.0.0.2} # Get from env var used by Nix
-echo "Hetzner Assigned Private IP: $HCLOUD_PRIVATE_IP"
-echo "Configured Control Plane IP: $CONFIG_PRIVATE_IP"
-if [ "$HCLOUD_PRIVATE_IP" != "$CONFIG_PRIVATE_IP" ]; then
-  echo "CRITICAL WARNING: IPs differ! Update NixOS k3sCommonSpecialArgs.k3sControlPlaneAddr in flake.nix to match $HCLOUD_PRIVATE_IP and rebuild image/redeploy nodes." >&2
-  # Consider exiting here if strict matching is required
-fi
-Test: IPs match.
-[ ] 7.5: Provision Initial Worker Node (hetzner-worker-static-01)
-
-Context: Creates the first worker node using the same image. Cloud-init user-data sets the role to worker. Applies labels k8s-cluster and k8s-nodepool=static-workers. Uses ${WORKER_VM_TYPE}.
-Implementation Detail: Use the just command:
-Bash
-
-# Run from NixOS Config Repo root
-cd /home/evan/2_Dev/2.1_Homelab/\!k3s-nixos-configs
-echo "Provisioning static worker node 'hetzner-worker-static-workers-1'..."
-# Uses default pool 'static-workers' and default WORKER_VM_TYPE
-just create-worker-node 1 pool="static-workers"
-Test: hcloud server list --selector k8s-nodepool=static-workers.
-[ ] 7.6: Wait for Worker Node to Boot
-
-Context: Allow time for boot, cloud-init (role set to 'worker'), NixOS activation, k3s-agent start.
-Implementation Detail: Monitor status and test SSH:
-Bash
-
-# Run from local machine
-WORKER_NODE_NAME="hetzner-worker-static-workers-1" # Matches default just command naming
-WORKER_NODE_IP=$(hcloud server ip $WORKER_NODE_NAME)
-ADMIN_USER=${ADMIN_USERNAME:-nixos}
-echo "Waiting for $WORKER_NODE_NAME ($WORKER_NODE_IP) SSH..."
-until ssh -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 $ADMIN_USER@$WORKER_NODE_IP exit; do
-  sleep 5 && echo -n ".";
-done; echo " SSH OK."
-Test: Successful SSH login.
-[ ] 7.7: Verify Worker Node Joins Cluster
-
-Context: The k3s agent service (enabled by role selector) connects to the control plane ($K3S_CONTROL_PLANE_ADDR) using the shared token ($K3S_TOKEN via sops-nix).
-Implementation Detail: Check using kubectl locally:
-Bash
-
-# Run from local machine
-export KUBECONFIG=~/.kube/config.k3s
-WORKER_NODE_NAME="hetzner-worker-static-workers-1"
-echo "Verifying worker node '$WORKER_NODE_NAME' registration..."
-until kubectl get node $WORKER_NODE_NAME &>/dev/null; do sleep 5 && echo -n "."; done; echo " Node Registered."
-echo "Verifying node '$WORKER_NODE_NAME' Ready status..."
-kubectl wait --for=condition=Ready node/$WORKER_NODE_NAME --timeout=5m
-kubectl get nodes -o wide # Show both nodes
-# Optional: Check agent logs on worker
-# ssh $ADMIN_USER@$WORKER_NODE_IP "sudo systemctl status k3s-agent.service"
-# ssh $ADMIN_USER@$WORKER_NODE_IP "sudo journalctl -u k3s-agent --no-pager -n 50"
-Test: kubectl get nodes shows both hetzner-control-01 (role control-plane,master) and hetzner-worker-static-workers-1 (role <none> or worker) as Ready.
-Phase 8: Flux Setup and GitOps Configuration
-Context: Install FluxCD into the cluster and configure it to manage the cluster state declaratively based on manifests stored in your Flux Git repository (!kube-flux), enabling GitOps workflows. Configure SOPS for decrypting secrets stored in Git.
-
-[ ] 8.1: Configure Kubernetes Access
-
-Context: Ensure kubectl on your local machine is configured to talk to the newly created Hetzner k3s cluster.
-Implementation Detail:
-Bash
-
-# Ensure KUBECONFIG points to the file saved by 'just get-kubeconfig'
-export KUBECONFIG=~/.kube/config.k3s
-echo "Current kubectl context:"
-kubectl config current-context
-echo "Cluster nodes:"
-kubectl get nodes
-Test: Commands run without errors and show the correct cluster context and nodes.
-[ ] 8.2: Prepare Existing Flux Repository (!kube-flux)
-
-Context: Ensure the designated path (clusters/hetzner/) and its subdirectories for different component categories exist in your Flux Git repo branch (hetzner-cluster or main).
-Implementation Detail: (Structure created in step 2.2). Verify:
-Bash
-
-# Run from local machine
-ls -d /home/evan/2_Dev/2.1_Homelab/\!kube-flux/clusters/hetzner/{core,infrastructure,apps,observability,security,delivery,registry,secrets-sync,backup}/
-Test: All planned subdirectories exist.
-[ ] 8.3: Bootstrap Flux
-
-Context: Installs Flux controllers (Source, Kustomize, Helm, Notification) into the flux-system namespace and sets up synchronization with your Git repo path (clusters/hetzner). Requires GitHub credentials/token.
-Implementation Detail: Use the just command:
-Bash
-
-# Run from NixOS Config Repo root
-# Ensure GITHUB_USER, GITHUB_TOKEN, FLUX_REPO env vars are sourced
-cd /home/evan/2_Dev/2.1_Homelab/\!k3s-nixos-configs
-echo "Bootstrapping Flux..."
-# This command runs flux bootstrap github ...
-just bootstrap-flux
-Test: Verify controllers start: kubectl get pods -n flux-system. Check initial sync status: flux check --kubeconfig=$KUBECONFIG, flux get sources git -A, flux get kustomizations -A. The main flux-system kustomization should reconcile successfully.
-[ ] 8.4: Configure Flux SOPS Integration
-
-Context: Allows Flux controllers to decrypt SOPS-encrypted manifests stored in Git using your private age key, which is stored securely as a K8s secret.
-Implementation Detail:
-Create sops-age Secret: Store the private age key ($AGE_PRIVATE_KEY) in a K8s secret. HANDLE THE PRIVATE KEY SECURELY.
-Bash
-
-# Run from local machine where AGE_PRIVATE_KEY is available securely
-if [ -z "$AGE_PRIVATE_KEY" ]; then echo "Error: AGE_PRIVATE_KEY env var not set." >&2; exit 1; fi
-echo "Creating 'sops-age' secret in 'flux-system' (contains PRIVATE key)..."
-echo -n "$AGE_PRIVATE_KEY" | kubectl create secret generic sops-age \
-  --namespace=flux-system \
-  --from-file=age.agekey=/dev/stdin
-# Immediately clear variable or history if needed
-unset AGE_PRIVATE_KEY
-# Verify secret exists BUT DO NOT PRINT ITS CONTENT
-kubectl get secret sops-age -n flux-system
-Configure Flux Kustomization: Edit the main Flux Kustomization manifest in your Git repo (!kube-flux/clusters/hetzner/flux-system/gotk-sync.yaml or similar) and add the decryption: block:
-YAML
-
-# In !kube-flux/clusters/hetzner/flux-system/gotk-sync.yaml
-# ... inside spec: ...
-  decryption:
-    provider: sops
-    secretRef:
-      name: sops-age # Points to the K8s secret created above
-# ...
-Commit and push this change. Flux will reconcile its own configuration.
-Test: Monitor Flux logs (flux logs --level=info -n flux-system -l app=kustomize-controller) for messages indicating SOPS decryption is enabled. Test decryption with a SOPS-encrypted manifest in Phase 9.
-[ ] 8.5+: Create Flux Kustomizations (Hierarchy)
-
-Context: Define the deployment structure and dependencies within Flux using Kustomization CRDs for each category of components.
-Implementation Detail: In the Flux repo (!kube-flux/clusters/hetzner/), create the top-level Kustomization YAML files referencing their respective subdirectories and declaring dependencies:
-core.yaml -> ./core
-infrastructure.yaml -> ./infrastructure, dependsOn: [core]
-secrets-sync.yaml -> ./secrets-sync, dependsOn: [infrastructure]
-registry.yaml -> ./registry, dependsOn: [infrastructure, secrets-sync]
-apps.yaml -> ./apps, dependsOn: [infrastructure, secrets-sync, registry]
-observability.yaml -> ./observability, dependsOn: [apps]
-security.yaml -> ./security, dependsOn: [infrastructure]
-delivery.yaml -> ./delivery, dependsOn: [apps]
-backup.yaml -> ./backup, dependsOn: [infrastructure, secrets-sync] Create corresponding placeholder kustomization.yaml files inside each subdirectory (e.g., infrastructure/kustomization.yaml). Example infrastructure.yaml (top-level CR):
-YAML
-
-# !kube-flux/clusters/hetzner/infrastructure.yaml
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: infrastructure # This name is used in dependsOn
-  namespace: flux-system
-spec:
-  interval: 10m
-  path: ./clusters/hetzner/infrastructure # Points to subdirectory
-  prune: true
-  sourceRef: { kind: GitRepository, name: flux-system }
-  dependsOn:
-    - name: core # Depends on core namespaces
-  timeout: 5m
-  healthChecks: # Optional: wait for key components
-    - { apiVersion: apps/v1, kind: DaemonSet, name: hcloud-csi-node, namespace: kube-system }
-    - { apiVersion: apps/v1, kind: Deployment, name: hcloud-cloud-controller-manager, namespace: kube-system }
-Test: Commit the structure and top-level Kustomization CRs to Git. Run flux get kustomizations -A. Observe the dependency order and reconciliation status (they will likely stall initially waiting for manifests in the subdirectories).
 
 ## Phase 9: Core Kubernetes Add-ons
 
@@ -2613,63 +2286,6 @@ spec:
 
 **Test**: Verify Grafana is running: `kubectl get pods -n monitoring`. Access the Grafana UI at https://grafana.example.com.
 
-### 10.3: Deploy Pixie
-
-**Context**: Pixie provides eBPF-based observability for Kubernetes applications without requiring code changes.
-
-**Implementation Detail**:
-
-1. Create the pixie namespace:
-
-```yaml
-# !kube-flux/clusters/hetzner/observability/pixie-namespace.yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: pixie
-```
-
-2. Add the Pixie Helm repository:
-
-```yaml
-# !kube-flux/clusters/hetzner/observability/pixie-repo.yaml
-apiVersion: source.toolkit.fluxcd.io/v1beta2
-kind: HelmRepository
-metadata:
-  name: pixie
-  namespace: flux-system
-spec:
-  interval: 1h
-  url: https://pixie-operator-charts.storage.googleapis.com
-```
-
-3. Deploy Pixie with Helm:
-
-```yaml
-# !kube-flux/clusters/hetzner/observability/pixie.yaml
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
-kind: HelmRelease
-metadata:
-  name: pixie-operator
-  namespace: pixie
-spec:
-  interval: 15m
-  chart:
-    spec:
-      chart: pixie-operator-chart
-      version: "0.0.20" # Check for latest version
-      sourceRef:
-        kind: HelmRepository
-        name: pixie
-        namespace: flux-system
-  values:
-    deployKey: "your-pixie-deploy-key" # Replace with your Pixie deploy key
-    clusterName: "hetzner-k3s"
-    pemMemoryLimit: "1Gi"
-```
-
-**Test**: Verify Pixie is running: `kubectl get pods -n pixie`. Access Pixie through the Pixie Cloud UI or CLI.
-
 ## Phase 11: Security Implementation
 
 Context: This phase deploys security tools to enhance the cluster's security posture, including runtime security and policy enforcement.
@@ -2736,93 +2352,6 @@ spec:
 ```
 
 **Test**: Verify Falco is running: `kubectl get pods -n falco`. Check Falco logs: `kubectl logs -n falco -l app=falco`.
-
-### 11.2: Deploy Kyverno
-
-**Context**: Kyverno is a policy engine for Kubernetes that validates, mutates, and generates resources based on policies.
-
-**Implementation Detail**:
-
-1. Create the kyverno namespace:
-
-```yaml
-# !kube-flux/clusters/hetzner/security/kyverno-namespace.yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kyverno
-```
-
-2. Add the Kyverno Helm repository:
-
-```yaml
-# !kube-flux/clusters/hetzner/security/kyverno-repo.yaml
-apiVersion: source.toolkit.fluxcd.io/v1beta2
-kind: HelmRepository
-metadata:
-  name: kyverno
-  namespace: flux-system
-spec:
-  interval: 1h
-  url: https://kyverno.github.io/kyverno/
-```
-
-3. Deploy Kyverno with Helm:
-
-```yaml
-# !kube-flux/clusters/hetzner/security/kyverno.yaml
-apiVersion: helm.toolkit.fluxcd.io/v2beta1
-kind: HelmRelease
-metadata:
-  name: kyverno
-  namespace: kyverno
-spec:
-  interval: 15m
-  chart:
-    spec:
-      chart: kyverno
-      version: "3.0.0" # Check for latest version
-      sourceRef:
-        kind: HelmRepository
-        name: kyverno
-        namespace: flux-system
-  values:
-    replicaCount: 1
-    resources:
-      limits:
-        cpu: 1000m
-        memory: 512Mi
-      requests:
-        cpu: 100m
-        memory: 128Mi
-```
-
-4. Create a basic policy:
-
-```yaml
-# !kube-flux/clusters/hetzner/security/require-labels-policy.yaml
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: require-labels
-spec:
-  validationFailureAction: audit # Change to enforce when ready
-  rules:
-    - name: require-app-label
-      match:
-        resources:
-          kinds:
-            - Deployment
-            - StatefulSet
-      validate:
-        message: "The label 'app' is required."
-        pattern:
-          metadata:
-            labels:
-              app: "?*"
-```
-
-**Test**: Verify Kyverno is running: `kubectl get pods -n kyverno`. Test the policy by creating a deployment without the required label and check if it's audited: `kubectl get policyreport -A`.
 
 ## Phase 12: CI/CD Integration
 
@@ -2994,111 +2523,7 @@ spec:
 
 **Test**: Verify Velero is running: `kubectl get pods -n velero`. Create a test backup: `velero backup create test-backup --include-namespaces default`.
 
-## Phase 14: Packer Integration for Image Building
 
-Context: This phase sets up Packer with the Hetzner Cloud plugin to automate the building and uploading of NixOS images to Hetzner.
-
-### 14.1: Create Packer Template
-
-**Context**: Packer automates the process of building and uploading the NixOS image to Hetzner Cloud, eliminating manual steps.
-
-**Implementation Detail**:
-
-1. Create a Packer template file:
-
-```hcl
-# /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs/packer/hetzner-nixos.pkr.hcl
-packer {
-  required_plugins {
-    hcloud = {
-      version = ">= 1.0.0"
-      source  = "github.com/hetznercloud/hcloud"
-    }
-  }
-}
-
-variable "hcloud_token" {
-  type      = string
-  sensitive = true
-}
-
-variable "image_name" {
-  type    = string
-  default = "nixos-k3s"
-}
-
-variable "image_version" {
-  type    = string
-  default = "1.0.0"
-}
-
-variable "nixos_image_path" {
-  type    = string
-  default = "../result/disk.raw"
-}
-
-source "hcloud" "nixos" {
-  token           = var.hcloud_token
-  image           = "debian-12"
-  location        = "ash"
-  server_type     = "cpx11"
-  ssh_username    = "root"
-  snapshot_name   = "${var.image_name}-${var.image_version}"
-  snapshot_labels = {
-    type    = "nixos"
-    version = var.image_version
-    builder = "packer"
-  }
-}
-
-build {
-  sources = ["source.hcloud.nixos"]
-
-  provisioner "file" {
-    source      = var.nixos_image_path
-    destination = "/tmp/nixos.raw"
-  }
-
-  provisioner "shell" {
-    inline = [
-      "apt-get update",
-      "apt-get install -y qemu-utils",
-      "qemu-img convert -f raw -O qcow2 /tmp/nixos.raw /dev/sda",
-      "sync"
-    ]
-  }
-}
-```
-
-2. Add a Justfile recipe for Packer:
-
-```
-# Add to /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs/justfile
-build-k3s-image-packer:
-    #!/usr/bin/env bash
-    cd /home/evan/2_Dev/2.1_Homelab/\!k3s-nixos-configs
-    echo "Building NixOS K3s image..."
-    nix build .#hetznerK3sNodeImage --impure
-    
-    echo "Initializing Packer plugins..."
-    cd packer
-    packer init .
-    
-    echo "Building and uploading image to Hetzner with Packer..."
-    VERSION=$(date +%Y%m%d-%H%M%S)
-    HCLOUD_TOKEN=${HETZNER_API_TOKEN} packer build \
-      -var "hcloud_token=${HETZNER_API_TOKEN}" \
-      -var "image_version=${VERSION}" \
-      -var "nixos_image_path=../result/disk.raw" \
-      hetzner-nixos.pkr.hcl
-    
-    echo "Image uploaded to Hetzner as nixos-k3s-${VERSION}"
-    echo "Setting HETZNER_IMAGE_NAME=nixos-k3s-${VERSION} in .env..."
-    perl -i -pe "s/^export HETZNER_IMAGE_NAME=.*/export HETZNER_IMAGE_NAME=\"nixos-k3s-${VERSION}\"/" .env
-    direnv allow .
-```
-
-**Test**: Run `just build-k3s-image-packer` to build and upload the image to Hetzner. Verify the image is available in the Hetzner Cloud Console.
 
 ## Phase 15: GitHub Actions CI/CD
 
@@ -3108,91 +2533,8 @@ Context: This phase sets up GitHub Actions workflows to automate the building an
 
 **Context**: Automates the building and testing of NixOS images on push to the main branch.
 
-**Implementation Detail**:
+NEED TO SET THIS UP since we changed from using packer
 
-```yaml
-# /home/evan/2_Dev/2.1_Homelab/!k3s-nixos-configs/.github/workflows/build-image.yml
-name: Build NixOS Image
-
-on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'k3s-cluster/**'
-      - 'flake.nix'
-      - 'flake.lock'
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@
-
-- name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v22
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: Build NixOS Image
-        run: |
-          nix build .#hetznerK3sNodeImage --impure
-          
-      - name: Test Image
-        run: |
-          ls -la result/
-          file result/disk.raw
-          
-      # In a real workflow, you would upload the image to Hetzner
-      # using Packer or directly via the Hetzner API
-
-### 15.2: Create GitHub Actions Workflow for Flux Manifests
-
-**Context**: Validates Kubernetes manifests on pull requests to the Flux repository.
-
-**Implementation Detail**:
-
-```yaml
-# /home/evan/2_Dev/2.1_Homelab/!kube-flux/.github/workflows/validate-manifests.yml
-name: Validate Kubernetes Manifests
-
-on:
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'clusters/hetzner/**'
-  workflow_dispatch:
-
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Setup Kubernetes Tools
-        uses: yokawasa/action-setup-kube-tools@v0.9.3
-        with:
-          kubectl: '1.27.3'
-          kustomize: '5.1.1'
-          helm: '3.12.3'
-          flux: '2.0.1'
-          kubeconform: 'latest'
-
-      - name: Validate Kubernetes Manifests
-        run: |
-          find clusters/hetzner -type f -name "*.yaml" | grep -v "kustomization.yaml" | xargs -I{} kubeconform -strict -ignore-missing-schemas {}
-          
-      - name: Validate Flux Kustomizations
-        run: |
-          find clusters/hetzner -type f -name "kustomization.yaml" | xargs -I{} kustomize build $(dirname {}) > /dev/null
-```
 
 ## Conclusion
 
@@ -3207,7 +2549,7 @@ This comprehensive implementation plan provides a detailed roadmap for setting u
 7. CI/CD integration for progressive delivery
 8. Automated image building and testing
 
-The modular approach allows you to implement each phase incrementally, testing thoroughly before moving to the next. The use of Tailscale provides secure access to your cluster, while Hetzner's private network ensures efficient inter-node communication.
+The modular approach allows you to implement each phase incrementally, testing thoroughly before moving to the next. The use of Tailscale's built-in integration with K3s provides a unified, secure network mesh for both node-to-node and pod networking, spanning different locations without complex traditional VPNs or peering. This approach simplifies networking while enhancing security.
 
 As you progress through this plan, remember to:
 
@@ -3216,5 +2558,7 @@ As you progress through this plan, remember to:
 3. Monitor resource usage and adjust VM types as needed
 4. Implement proper backup and disaster recovery procedures
 5. Keep all components updated to their latest stable versions
+6. Manage Tailscale ACLs for network policy enforcement
+7. Rotate Infisical Universal Auth credentials periodically for security
 
 With this foundation in place, you'll have a robust platform for deploying and managing applications in a secure, scalable, and maintainable way.

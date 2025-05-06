@@ -44,7 +44,10 @@ in {
       "--node-ip=${controlPlaneIp}"
       "--advertise-address=${controlPlaneIp}"
       "--bind-address=0.0.0.0" # Listen on all interfaces for LB/external access
-      "--flannel-iface=${privateInterface}"
+      "--node-external-ip=$(tailscale ip -4)" # Use Tailscale IP for external access
+      "--vpn-auth-file=/run/infisical-secrets/tailscale_join_key" # Use Tailscale for networking
+      "--flannel-backend=none" # Disable Flannel as we're using Tailscale
+      "--disable-network-policy" # Network policies handled by Tailscale ACLs
       "--kubelet-arg=cloud-provider=external"
       "--disable-cloud-controller"
       "--disable=servicelb,traefik" # Disable defaults we install manually
@@ -67,7 +70,7 @@ in {
 
   # Firewall rules for control plane
   networking.firewall.allowedTCPPorts = [ 6443 2379 2380 ]; # K8s API, etcd client, etcd peer
-  networking.firewall.allowedUDPPorts = [ ]; # Flannel handled by worker rules or separate module
+  networking.firewall.allowedUDPPorts = [ 41641 ]; # Tailscale
 
   # Add essential client tools
   environment.systemPackages = with pkgs; [ kubectl kubernetes-helm fluxcd ];
