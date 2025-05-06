@@ -1,0 +1,7 @@
+keys:
+  - &admin age1p5vdpde60kwfjqeyufvp8xxtfk4ja39h42v4y26u8ju85ysw9y4qvuh0cd # Using the AGE_PUBLIC_KEY from .env
+creation_rules:
+  - path_regex: secrets/secrets\.yaml$
+    key_groups:
+      - age:
+        - *admin

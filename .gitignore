@@ -1,0 +1,27 @@
+# Environment secrets
+.env
+
+# Nix build results
+result
+result-*
+
+# Direnv
+.direnv/
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Compressed images
+*.zst
+*.raw
+
+# Kubeconfig files (may contain sensitive data)
+kubeconfig
+*.kubeconfig
+
+# Other potential secrets
+*.pem
+*.key
+*.crt
