@@ -12,9 +12,17 @@
       url = "github:serokell/deploy-rs";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nixos-anywhere = {
+      url = "github:nix-community/nixos-anywhere";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    disko = {
+      url = "github:nix-community/disko";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, sops-nix, deploy-rs, ... }:
+  outputs = { self, nixpkgs, flake-utils, sops-nix, deploy-rs, nixos-anywhere, disko, ... }:
     let
       # Import the make-k3s-node function
       makeK3sNode = system: import ./k3s-cluster/lib/make-k3s-node.nix {
@@ -46,6 +54,7 @@
           extraModules = [
             sops-nix.nixosModules.sops
             ./k3s-cluster/secrets.nix
+            disko.nixosModules.disko
           ];
         };
         
@@ -60,69 +69,7 @@
           extraModules = [
             sops-nix.nixosModules.sops
             ./k3s-cluster/secrets.nix
-          ];
-        };
-        
-        # Hetzner K3s node image builder
-        "k3s-node-cloud-builder" = nixpkgs.lib.nixosSystem {
-          system = "x86_64-linux";
-          modules = [
-            ./k3s-cluster/nodes/hetzner-k3s-node/default.nix
-            sops-nix.nixosModules.sops
-            ./k3s-cluster/secrets.nix
-            # Add module for building a disk image
-            "${nixpkgs}/nixos/modules/installer/sd-card/sd-image.nix"
-            {
-              # Add any additional configuration for the image builder
-              system.stateVersion = nixpkgs.lib.mkForce "24.11";
-              
-              # Pass special arguments to modules
-              _module.args = {
-                k3sControlPlaneAddr = k3sCommonSpecialArgs.k3sControlPlaneAddr;
-                k3sToken = k3sCommonSpecialArgs.k3sToken;
-                tailscaleAuthKey = k3sCommonSpecialArgs.tailscaleAuthKey;
-              };
-              
-              # Configure the SD image (which produces a raw disk image)
-              sdImage.compressImage = false;
-              sdImage.imageBaseName = "hetzner-k3s-node";
-              sdImage.populateRootCommands = ''
-                mkdir -p ./files/boot
-                mkdir -p ./files/etc
-                
-                # Copy config files but exclude problematic directories
-                cp -r $NIXOS_CONFIG_PATH/* ./files/etc/
-                
-                # Remove any proc directory that might have been copied
-                rm -rf ./files/etc/proc
-                
-                # Create an empty /proc directory instead
-                mkdir -p ./files/proc
-              '';
-              sdImage.populateFirmwareCommands = "true";  # No firmware needed
-            }
-          ];
-        };
-        
-        # Installer ISO configuration
-        "installer" = nixpkgs.lib.nixosSystem {
-          system = "x86_64-linux";
-          modules = [
-            "${nixpkgs}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix"
-            {
-              # Basic installer configuration
-              system.stateVersion = "24.11";
-              
-              # Add k3s and other tools to the installer
-              environment.systemPackages = with nixpkgs.legacyPackages.x86_64-linux; [
-                k3s
-                kubectl
-                git
-                vim
-                curl
-                wget
-              ];
-            }
+            disko.nixosModules.disko
           ];
         };
       };
@@ -170,19 +117,6 @@
         pkgs = nixpkgs.legacyPackages.${system};
       in
       {
-        # Packages for building images and installers
-        packages = {
-          # Hetzner K3s node image
-          hetznerK3sNodeImage = (self.nixosConfigurations.k3s-node-cloud-builder.config.system.build.sdImage) // {
-            meta.description = "Hetzner K3s node image";
-          };
-          
-          # Installer ISO
-          installerIso = (self.nixosConfigurations.installer.config.system.build.isoImage) // {
-            meta.description = "K3s installer ISO";
-          };
-        };
-        
         # Development shell
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
@@ -207,6 +141,9 @@
             sops
             age
             
+            # NixOS Anywhere
+            nixos-anywhere.packages.${system}.nixos-anywhere
+            
             # Task automation
             just
             
@@ -230,7 +167,6 @@
             export HETZNER_NETWORK_ZONE="us-east"
             export PRIVATE_NETWORK_NAME="k3s-net"
             export FIREWALL_NAME="k3s-fw"
-            export HETZNER_IMAGE_NAME="my-k3s-image-v1"
             export HETZNER_SSH_KEY_NAME="blade-nixos SSH Key"
             export CONTROL_PLANE_VM_TYPE="cpx31"
             export WORKER_VM_TYPE="cpx21"
