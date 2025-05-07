@@ -1,16 +1,26 @@
-{ config, lib, pkgs, ... }:
-
+# ./k3s-cluster/modules/disko-hetzner.nix
+# This module defines a disk layout specifically for building Hetzner disk images
+# (e.g., using NixOS's make-disk-image.nix functions).
+# It is NOT used by nixos-everywhere.sh for installing onto the existing root FS.
+{
+  config,
+  lib,
+  pkgs,
+  specialArgs ? { },
+  ...
+}:
 {
   disko.devices = {
     disk = {
-      sda = {
+      mainDisk = {
+        # Name for this disk configuration (e.g. "sda" or "nvme0n1")
+        device = specialArgs.targetImageDiskDevice or "/dev/sda"; # Allow override via Flake for image build
         type = "disk";
-        device = "/dev/sda";
         content = {
           type = "gpt";
           partitions = {
             boot = {
-              name = "boot";
+              name = "ESP";
               size = "512M";
               type = "EF00"; # EFI System Partition
               content = {
@@ -20,16 +30,15 @@
               };
             };
             swap = {
-              name = "swap";
-              size = "8G";
+              name = "SWAP";
+              size = specialArgs.targetImageSwapSize or "4G"; # Allow override
               content = {
                 type = "swap";
-                randomEncryption = false;
               };
             };
             root = {
-              name = "nixos";
-              size = "100%";
+              name = "NIXOS_ROOT";
+              size = "100%"; # Use remaining space
               content = {
                 type = "filesystem";
                 format = "ext4";

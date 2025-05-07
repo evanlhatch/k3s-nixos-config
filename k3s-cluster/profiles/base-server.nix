@@ -38,7 +38,7 @@
     # K3s and related tools
     k3s
     tailscale
-    infisical-cli
+    infisical
     
     # File tools
     file
