@@ -50,8 +50,7 @@ let
       ../locations/local.nix
     else
       ({ ... }: { }); # Provide a valid empty module
-in
-let
+
   # Create a simple specialArgs set with all the parameters
   specialArgsSet = {
     inherit
@@ -78,11 +77,6 @@ let
     if infisicalBootstrapCredentials != { } && nodeSecretsProvider == "infisical"
     then specialArgsSet // { infisicalBootstrap = infisicalBootstrapCredentials; }
     else specialArgsSet;
-in
-
-lib.nixosSystem {
-  inherit system;
-  specialArgs = specialArgsWithInfisical;
 
   # Create a list of base modules that are always included
   baseModules = [
@@ -120,12 +114,9 @@ lib.nixosSystem {
   # Combine all modules
   allModules = baseModules ++ locationModules ++ roleModules ++
                hardwareModules ++ sopsModules ++ extraModules ++ finalModules;
-
-  # Create the NixOS system
-  nixosSystem = lib.nixosSystem {
-    inherit system;
-    specialArgs = specialArgsWithInfisical;
-    modules = allModules;
-  };
-in nixosSystem
+in
+lib.nixosSystem {
+  inherit system;
+  specialArgs = specialArgsWithInfisical;
+  modules = allModules;
 }
