@@ -55,7 +55,7 @@
       commonNodeArgumentsFromEnv = {
         k3sControlPlaneAddr = getEnv "K3S_CONTROL_PLANE_ADDR" "hetzner-control-01.cinnamon-galaxy.ts.net"; # Use Tailscale FQDN
         adminUsername = getEnv "ADMIN_USERNAME" "nixos";
-        adminSshPublicKey = getEnv "ADMIN_SSH_PUBLIC_KEY" "YOUR_FALLBACK_SSH_PUBLIC_KEY_HERE_AS_A_STRING"; # Ensure this is a valid key string
+        adminSshPublicKey = getEnv "ADMIN_SSH_PUBLIC_KEY" "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI_PLACEHOLDER_SSH_KEY"; # Replace with your key via env var
         nixosStateVersion = getEnv "NIXOS_STATE_VERSION" "24.11";
         hetznerPublicInterface = getEnv "HETZNER_PUBLIC_IFACE" "eth0";
         hetznerPrivateInterface = getEnv "HETZNER_PRIVATE_IFACE" "ens10";

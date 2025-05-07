@@ -26,3 +26,12 @@ kubeconfig
 *.key
 *.crt
 env-vars.sh
+
+# Project-specific files not to be shared
+FINAL PLAN.md
+
+# Infisical configuration
+.infisical.json
+
+# Compressed disk images
+hetzner-k3s-*.zst
