@@ -222,21 +222,21 @@
         # Add "hetzner-worker-static-01" similarly
       };
 
-      packages = flake-utils.lib.eachDefaultSystem (system:
+      # Define packages for specific systems
+      packages.x86_64-linux =
         let
+          system = "x86_64-linux";
           pkgs = nixpkgs.legacyPackages.${system};
           buildDiskImage = name: nixosConfigName: format: diskSize: pkgs.callPackage "${nixpkgs}/nixos/lib/make-disk-image.nix" {
             inherit name format diskSize;
             config = self.nixosConfigurations."${nixosConfigName}".config;
           };
         in
-        # Return a set of packages for this system
         {
           hetznerK3sWorkerRawImage = buildDiskImage "hetzner-k3s-worker-image" "k3sWorkerImageConfig" "raw" "10G";
           hetznerK3sControlRawImage = buildDiskImage "hetzner-k3s-control-image" "k3sControlImageConfig" "raw" "10G";
           # Installer ISO removed
-        }
-      );
+        };
 
       devShells = flake-utils.lib.eachDefaultSystem (system:
         let
