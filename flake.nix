@@ -238,8 +238,10 @@
           # Installer ISO removed
         };
 
-      devShells = flake-utils.lib.eachDefaultSystem (system:
+      # Define devShells for specific systems
+      devShells.x86_64-linux =
         let
+          system = "x86_64-linux";
           pkgs = nixpkgs.legacyPackages.${system};
         in
         {
@@ -265,7 +267,6 @@
               export K3S_CONTROL_PLANE_ADDR="${commonNodeArgumentsFromEnv.k3sControlPlaneAddr}"
             '';
           };
-        }
-      );
+        };
     }; # End outputs
 }
