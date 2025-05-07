@@ -168,19 +168,7 @@
         };
         # ... (similar for k3sControlImageConfig) ...
 
-        # Example for local installer ISO
-        "localInstallerIsoConfig" = makeK3sNode "x86_64-linux" {
-           hostname = "nixos-installer";
-           role = "none";
-           location = "local";
-           nodeSecretsProvider = "none"; # No bootstrap secrets for a generic installer
-           hardwareConfigPath = "${nixpkgs.path}/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix";
-           extraModules = [
-             { environment.systemPackages = with nixpkgs.legacyPackages.x86_64-linux; [ git vim parted gptfdisk disko ]; }
-             { services.openssh.settings.PermitRootLogin = "yes"; }
-             { users.users.root.openssh.authorizedKeys.keys = [ commonNodeArgumentsFromEnv.adminSshPublicKey ]; }
-           ];
-         };
+        # Installation ISO configuration removed as requested
       }; # End nixosConfigurations
 
       deploy.nodes = {
@@ -208,7 +196,7 @@
         {
           hetznerK3sWorkerRawImage = buildDiskImage "hetzner-k3s-worker-image" "k3sWorkerImageConfig" "raw" "10G";
           hetznerK3sControlRawImage = buildDiskImage "hetzner-k3s-control-image" "k3sControlImageConfig" "raw" "10G";
-          k3sInstallerIso = self.nixosConfigurations.localInstallerIsoConfig.config.system.build.isoImage;
+          # Installer ISO removed
         });
 
       devShells = flake-utils.lib.eachDefaultSystem (system:
