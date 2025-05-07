@@ -250,9 +250,7 @@
               git curl wget jq yq
               nixpkgs-fmt
               hcloud kubectl kubernetes-helm fluxcd
-              # Use pkgs.sops instead of inputs.sops-nix.packages.${system}.sops
-              deploy-rs
-              sops
+              # Remove deploy-rs and sops since they're not available in pkgs
               just
               gh
               tailscale
