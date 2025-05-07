@@ -78,7 +78,6 @@
           extraModules = [
             ./k3s-cluster/modules/infisical-agent.nix
             ./k3s-cluster/modules/tailscale.nix
-            ./k3s-cluster/modules/netdata.nix
             # NO sops-nix module or secrets.nix here for K3s/Tailscale bootstrap
             # NO disko modules for root disk here
           ];
@@ -94,7 +93,6 @@
           extraModules = [
             ./k3s-cluster/modules/infisical-agent.nix
             ./k3s-cluster/modules/tailscale.nix
-            ./k3s-cluster/modules/netdata.nix
           ];
         };
 
@@ -110,7 +108,6 @@
           # hardwareConfigPath = ./k3s-cluster/hardware-configs/hetzner-control-01.nix;
           # If this node also needs disko for its setup (e.g. if deploy-rs handles partitioning)
           extraModules = [
-            ./k3s-cluster/modules/netdata.nix
             # disko.nixosModules.disko
             # ./k3s-cluster/modules/disko-hetzner.nix
           ];
@@ -122,9 +119,7 @@
           location = "hetzner";
           nodeSecretsProvider = "sops";
           sopsSecretsFile = ./k3s-cluster/secrets.nix;
-          extraModules = [
-            ./k3s-cluster/modules/netdata.nix
-          ];
+          extraModules = [];
         };
 
         # === CONFIGURATIONS FOR BUILDING STANDALONE DISK IMAGES (Uses Infisical + Disko) ===
@@ -143,7 +138,6 @@
             ./k3s-cluster/roles/k3s-worker.nix    # Must be Infisical-aware via specialArgs.nodeSecretsProvider
             ./k3s-cluster/modules/infisical-agent.nix # Configured by specialArgs.infisicalBootstrap
             ./k3s-cluster/modules/tailscale.nix
-            ./k3s-cluster/modules/netdata.nix
             disko.nixosModules.disko                 # Disko module for partitioning
             ./k3s-cluster/modules/disko-hetzner.nix  # Your specific Disko layout for images
             { system.stateVersion = commonNodeArgumentsFromEnv.nixosStateVersion; }
@@ -162,7 +156,6 @@
              { environment.systemPackages = with nixpkgs.legacyPackages.x86_64-linux; [ git vim parted gptfdisk disko ]; }
              { services.openssh.settings.PermitRootLogin = "yes"; }
              { users.users.root.openssh.authorizedKeys.keys = [ commonNodeArgumentsFromEnv.adminSshPublicKey ]; }
-             ./k3s-cluster/modules/netdata.nix
            ];
          };
       }; # End nixosConfigurations

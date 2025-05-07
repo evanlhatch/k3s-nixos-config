@@ -4,6 +4,7 @@
   imports = [
     ../modules/tailscale.nix
     ../modules/infisical-agent.nix
+    ../modules/netdata.nix
   ];
   # System configuration
   boot.tmp.cleanOnBoot = true;
