@@ -166,7 +166,44 @@
             })
           ];
         };
-        # ... (similar for k3sControlImageConfig) ...
+        
+        # Control plane image configuration
+        "k3sControlImageConfig" = nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
+          specialArgs = commonNodeArgumentsFromEnv // infisicalBootstrapForTemplatesAndImages // {
+            hostname = "k3s-control-img";
+            role = "control";
+            location = "hetzner";
+            isFirstControlPlane = true;
+            # Ensure disko-hetzner.nix uses specialArgs for diskDevice and swapSize if needed
+          };
+          modules = [
+            ./k3s-cluster/common.nix
+            ./k3s-cluster/profiles/base-server.nix
+            ./k3s-cluster/locations/hetzner.nix
+            ./k3s-cluster/roles/k3s-control.nix    # Must be Infisical-aware via specialArgs.nodeSecretsProvider
+            ./k3s-cluster/modules/infisical-agent.nix # Configured by specialArgs.infisicalBootstrap
+            ./k3s-cluster/modules/tailscale.nix
+            disko.nixosModules.disko                 # Disko module for partitioning
+            ./k3s-cluster/modules/disko-hetzner.nix  # Your specific Disko layout for images
+            { system.stateVersion = commonNodeArgumentsFromEnv.nixosStateVersion; }
+            
+            # Add dummy filesystem and boot loader configuration for flake check
+            ({ lib, ... }: {
+              # Dummy filesystem configuration for flake check
+              fileSystems."/" = lib.mkForce {
+                device = "/dev/disk/by-label/nixos";
+                fsType = "ext4";
+              };
+              
+              # Dummy boot loader configuration for flake check
+              boot.loader.grub = lib.mkForce {
+                enable = true;
+                devices = [ "/dev/sda" ];
+              };
+            })
+          ];
+        };
 
         # Installation ISO configuration removed as requested
       }; # End nixosConfigurations
