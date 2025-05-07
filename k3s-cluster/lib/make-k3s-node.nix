@@ -39,7 +39,7 @@ let
     else if role == "worker" then
       ../roles/k3s-worker.nix
     else if role == "none" then
-      { } # No K3s role
+      ({ ... }: { }) # No K3s role, but provide a valid module
     else
       throw "Invalid role: ${role}";
 
@@ -49,7 +49,7 @@ let
     else if location == "local" then
       ../locations/local.nix
     else
-      { };
+      ({ ... }: { }); # Provide a valid empty module
 in
 lib.nixosSystem {
   inherit system;
@@ -85,8 +85,8 @@ lib.nixosSystem {
     [
       commonConfigModule
       baseServerProfileModule
-      locationModule
-      roleModule # This needs to use specialArgs.nodeSecretsProvider
+      (lib.mkIf (location == "hetzner" || location == "local") locationModule)
+      (lib.mkIf (role == "control" || role == "worker") roleModule) # This needs to use specialArgs.nodeSecretsProvider
 
       (lib.mkIf (
         hardwareConfigPath != null && builtins.typeOf hardwareConfigPath == "string"
