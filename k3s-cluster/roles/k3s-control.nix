@@ -13,14 +13,14 @@ let
 
   # Define paths for K3s token and Tailscale auth key based on the provider
   k3sTokenFile =
-    if isInfisical then
+    if isInfisicalProvider then
       "/run/infisical-secrets/k3s_token"
     # Assumes 'k3s_cluster_token' is the name of the secret in your sops file if using sops-nix
     else
       config.sops.secrets.k3s_cluster_token.path;
 
   tailscaleAuthKeyFile =
-    if isInfisical then
+    if isInfisicalProvider then
       "/run/infisical-secrets/tailscale_join_key"
     # Assumes 'tailscale_k3s_authkey' is the name of the secret for sops-nix
     else
@@ -38,8 +38,8 @@ in
     description = "Lightweight Kubernetes (Server / Control Plane)";
     wantedBy = [ "multi-user.target" ];
     # Must start after network is fully up and secrets (if any) are available
-    after = [ "network-online.target" ] ++ (lib.optional isInfisical "infisical-agent.service");
-    wants = [ "network-online.target" ] ++ (lib.optional isInfisical "infisical-agent.service");
+    after = [ "network-online.target" ] ++ (lib.optional isInfisicalProvider "infisical-agent.service");
+    wants = [ "network-online.target" ] ++ (lib.optional isInfisicalProvider "infisical-agent.service");
     serviceConfig = {
       Type = "notify";
       ExecStart = "${pkgs.k3s}/bin/k3s server"; # Base command
