@@ -84,33 +84,46 @@ lib.nixosSystem {
   inherit system;
   specialArgs = specialArgsWithInfisical;
 
-  modules =
-    [
-      commonConfigModule
-      baseServerProfileModule
-      (lib.mkIf (location == "hetzner" || location == "local") locationModule)
-      (lib.mkIf (role == "control" || role == "worker") roleModule) # This needs to use specialArgs.nodeSecretsProvider
+  # Create a list of base modules that are always included
+  baseModules = [
+    commonConfigModule
+    baseServerProfileModule
+    { networking.hostName = hostname; } # Explicitly set hostname
+  ];
 
-      (lib.mkIf (
-        hardwareConfigPath != null && builtins.typeOf hardwareConfigPath == "string"
-      ) hardwareConfigPath)
+  # Add location module if applicable
+  locationModules = if (location == "hetzner" || location == "local")
+                    then [ locationModule ]
+                    else [];
 
-      (
-        { config, ... }:
-        {
-          networking.hostName = hostname;
-        }
-      ) # Explicitly set hostname
+  # Add role module if applicable
+  roleModules = if (role == "control" || role == "worker")
+                then [ roleModule ]
+                else [];
 
-      # Conditionally import sops-nix module and the user's sops secrets definition
-      (lib.mkIf (nodeSecretsProvider == "sops" && sopsNixModule != null) sopsNixModule)
-      (lib.mkIf (nodeSecretsProvider == "sops" && sopsSecretsFile != null) sopsSecretsFile)
+  # Add hardware config if provided
+  hardwareModules = if (hardwareConfigPath != null && builtins.typeOf hardwareConfigPath == "string")
+                    then [ hardwareConfigPath ]
+                    else [];
 
-      # Example for disko, if image configs use makeK3sNode and want disko this way:
-      # (lib.mkIf (/* some condition, e.g. specialArgs.useDisko */ && diskoModule != null) diskoModule)
-      # (lib.mkIf (/* some condition */ && specialArgs.diskoConfigFile != null) specialArgs.diskoConfigFile)
+  # Add sops modules if applicable
+  sopsModules = if (nodeSecretsProvider == "sops")
+                then (if sopsNixModule != null then [ sopsNixModule ] else []) ++
+                     (if sopsSecretsFile != null then [ sopsSecretsFile ] else [])
+                else [];
 
-    ]
-    ++ extraModules
-    ++ (if finalExtraConfig != { } then [ finalExtraConfig ] else [ ]);
+  # Add finalExtraConfig if it's not empty
+  finalModules = if finalExtraConfig != { }
+                 then [ finalExtraConfig ]
+                 else [];
+
+  # Combine all modules
+  allModules = baseModules ++ locationModules ++ roleModules ++
+               hardwareModules ++ sopsModules ++ extraModules ++ finalModules;
+in
+
+lib.nixosSystem {
+  inherit system;
+  specialArgs = specialArgsWithInfisical;
+  modules = allModules;
 }
