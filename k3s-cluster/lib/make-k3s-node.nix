@@ -26,7 +26,7 @@
   diskoModule ? null, # This will be inputs.disko.nixosModules.disko
 
   extraModules ? [ ],
-  finalExtraConfig ? ({ ... }: { }),
+  finalExtraConfig ? { },
 }:
 
 let
@@ -109,7 +109,5 @@ lib.nixosSystem {
 
     ]
     ++ extraModules
-    ++ [
-      (lib.mkIf (finalExtraConfig != null) finalExtraConfig)
-    ];
+    ++ (if finalExtraConfig != { } then [ finalExtraConfig ] else [ ]);
 }
