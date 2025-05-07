@@ -7,7 +7,8 @@
   ...
 }:
 {
-  imports = [ (modulesPath + "/profiles/qemu-guest.nix") ];
+  # Enable qemuGuest service directly instead of importing the module
+  imports = [ ];
 
   boot.initrd.availableKernelModules = [
     "virtio_pci"
