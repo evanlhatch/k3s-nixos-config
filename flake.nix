@@ -22,23 +22,31 @@
   outputs = { self, nixpkgs, flake-utils, sops-nix, deploy-rs, disko, ... }@inputs: # Make all inputs accessible
     let
       # Import the make-k3s-node function and pass necessary Flake inputs to it
-      makeK3sNode = system: args: import ./k3s-cluster/lib/make-k3s-node.nix ({
-        inherit (nixpkgs) lib;
-        pkgs = nixpkgs.legacyPackages.${system};
-        # Pass the sops-nix module itself, not the whole inputs attrset
-        sopsNixModule = inputs.sops-nix.nixosModules.sops;
-        # Pass the disko module if makeK3sNode needs to conditionally import it
-        diskoModule = disko.nixosModules.disko;
-        # Pass common arguments
-        k3sControlPlaneAddr = commonNodeArgumentsFromEnv.k3sControlPlaneAddr;
-        adminUsername = commonNodeArgumentsFromEnv.adminUsername;
-        adminSshPublicKey = commonNodeArgumentsFromEnv.adminSshPublicKey;
-        nixosStateVersion = commonNodeArgumentsFromEnv.nixosStateVersion;
-        hetznerPublicInterface = commonNodeArgumentsFromEnv.hetznerPublicInterface;
-        hetznerPrivateInterface = commonNodeArgumentsFromEnv.hetznerPrivateInterface;
-        targetImageDiskDevice = commonNodeArgumentsFromEnv.targetImageDiskDevice;
-        targetImageSwapSize = commonNodeArgumentsFromEnv.targetImageSwapSize;
-      } // args);
+      makeK3sNode = system: args:
+        let
+          # Create a merged set of arguments with defaults from commonNodeArgumentsFromEnv
+          mergedArgs = {
+            inherit (nixpkgs) lib;
+            pkgs = nixpkgs.legacyPackages.${system};
+            # Pass the sops-nix module itself, not the whole inputs attrset
+            sopsNixModule = inputs.sops-nix.nixosModules.sops;
+            # Pass the disko module if makeK3sNode needs to conditionally import it
+            diskoModule = disko.nixosModules.disko;
+            # Pass common arguments
+            k3sControlPlaneAddr = commonNodeArgumentsFromEnv.k3sControlPlaneAddr;
+            adminUsername = commonNodeArgumentsFromEnv.adminUsername;
+            adminSshPublicKey = commonNodeArgumentsFromEnv.adminSshPublicKey;
+            nixosStateVersion = commonNodeArgumentsFromEnv.nixosStateVersion;
+            hetznerPublicInterface = commonNodeArgumentsFromEnv.hetznerPublicInterface;
+            hetznerPrivateInterface = commonNodeArgumentsFromEnv.hetznerPrivateInterface;
+            targetImageDiskDevice = commonNodeArgumentsFromEnv.targetImageDiskDevice;
+            targetImageSwapSize = commonNodeArgumentsFromEnv.targetImageSwapSize;
+            # Default empty values for optional parameters
+            extraModules = [];
+            finalExtraConfig = {};
+          } // args;
+        in
+          import ./k3s-cluster/lib/make-k3s-node.nix mergedArgs;
 
       # Common arguments (sourced from environment for local builds, or defaults)
       # Helper function for environment variables with defaults

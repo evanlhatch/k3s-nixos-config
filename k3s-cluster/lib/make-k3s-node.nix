@@ -108,6 +108,6 @@ lib.nixosSystem {
       # (lib.mkIf (/* some condition */ && specialArgs.diskoConfigFile != null) specialArgs.diskoConfigFile)
 
     ]
-    ++ (if extraModules != null then extraModules else [])
-    ++ (if finalExtraConfig != null && finalExtraConfig != { } then [ finalExtraConfig ] else [ ]);
+    ++ extraModules
+    ++ (if finalExtraConfig != { } then [ finalExtraConfig ] else [ ]);
 }
