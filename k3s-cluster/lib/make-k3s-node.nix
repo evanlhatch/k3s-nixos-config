@@ -120,10 +120,12 @@ lib.nixosSystem {
   # Combine all modules
   allModules = baseModules ++ locationModules ++ roleModules ++
                hardwareModules ++ sopsModules ++ extraModules ++ finalModules;
-in
 
-lib.nixosSystem {
-  inherit system;
-  specialArgs = specialArgsWithInfisical;
-  modules = allModules;
+  # Create the NixOS system
+  nixosSystem = lib.nixosSystem {
+    inherit system;
+    specialArgs = specialArgsWithInfisical;
+    modules = allModules;
+  };
+in nixosSystem
 }
