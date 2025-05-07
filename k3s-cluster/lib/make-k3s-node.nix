@@ -51,35 +51,38 @@ let
     else
       ({ ... }: { }); # Provide a valid empty module
 in
+let
+  # Create a simple specialArgs set with all the parameters
+  specialArgsSet = {
+    inherit
+      hostname
+      role
+      location
+      k3sControlPlaneAddr
+      nodeSecretsProvider
+      isFirstControlPlane
+      hetznerPublicInterface
+      hetznerPrivateInterface
+      adminUsername
+      adminSshPublicKey
+      nixosStateVersion
+      targetImageDiskDevice
+      targetImageSwapSize
+      ;
+    # Add modulesPath for NixOS modules that need it
+    modulesPath = "${toString pkgs.path}/nixos/modules";
+  };
+
+  # Add infisicalBootstrap if needed
+  specialArgsWithInfisical =
+    if infisicalBootstrapCredentials != { } && nodeSecretsProvider == "infisical"
+    then specialArgsSet // { infisicalBootstrap = infisicalBootstrapCredentials; }
+    else specialArgsSet;
+in
+
 lib.nixosSystem {
   inherit system;
-
-  specialArgs =
-    {
-      inherit
-        hostname
-        role
-        location
-        k3sControlPlaneAddr
-        nodeSecretsProvider
-        isFirstControlPlane
-        hetznerPublicInterface
-        hetznerPrivateInterface
-        adminUsername
-        adminSshPublicKey
-        nixosStateVersion
-        targetImageDiskDevice
-        targetImageSwapSize
-        ;
-      # Add modulesPath for NixOS modules that need it
-      modulesPath = "${toString pkgs.path}/nixos/modules";
-    }
-    // (
-      if infisicalBootstrapCredentials != { } && nodeSecretsProvider == "infisical" then
-        { infisicalBootstrap = infisicalBootstrapCredentials; }
-      else
-        { }
-    );
+  specialArgs = specialArgsWithInfisical;
 
   modules =
     [
