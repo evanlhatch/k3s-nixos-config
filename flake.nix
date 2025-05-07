@@ -149,6 +149,21 @@
             disko.nixosModules.disko                 # Disko module for partitioning
             ./k3s-cluster/modules/disko-hetzner.nix  # Your specific Disko layout for images
             { system.stateVersion = commonNodeArgumentsFromEnv.nixosStateVersion; }
+            
+            # Add dummy filesystem and boot loader configuration for flake check
+            {
+              # Dummy filesystem configuration for flake check
+              fileSystems."/" = {
+                device = "/dev/disk/by-label/nixos";
+                fsType = "ext4";
+              };
+              
+              # Dummy boot loader configuration for flake check
+              boot.loader.grub = {
+                enable = true;
+                devices = [ "/dev/sda" ];
+              };
+            }
           ];
         };
         # ... (similar for k3sControlImageConfig) ...
