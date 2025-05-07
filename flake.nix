@@ -193,11 +193,13 @@
             config = self.nixosConfigurations."${nixosConfigName}".config;
           };
         in
+        # Return a set of packages for this system
         {
           hetznerK3sWorkerRawImage = buildDiskImage "hetzner-k3s-worker-image" "k3sWorkerImageConfig" "raw" "10G";
           hetznerK3sControlRawImage = buildDiskImage "hetzner-k3s-control-image" "k3sControlImageConfig" "raw" "10G";
           # Installer ISO removed
-        });
+        }
+      );
 
       devShells = flake-utils.lib.eachDefaultSystem (system:
         let
