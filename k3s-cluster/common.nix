@@ -1,12 +1,8 @@
 { config, lib, pkgs, specialArgs, ... }:
 
 let
-  # Get SSH public key from environment or use default
-  sshPublicKey = let
-    fromEnv = builtins.getEnv "ADMIN_SSH_PUBLIC_KEY";
-  in
-    if fromEnv != "" then fromEnv else
-    "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD_PLACEHOLDER_SSH_KEY_REPLACE_WITH_YOUR_ACTUAL_KEY";
+  # Get SSH public key from environment
+  sshPublicKey = builtins.getEnv "ADMIN_SSH_PUBLIC_KEY";
 in
 {
   time.timeZone = "Etc/UTC";
