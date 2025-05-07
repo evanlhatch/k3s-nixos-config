@@ -151,7 +151,7 @@
             { system.stateVersion = commonNodeArgumentsFromEnv.nixosStateVersion; }
             
             # Add dummy filesystem and boot loader configuration for flake check
-            { lib, ... }: {
+            ({ lib, ... }: {
               # Dummy filesystem configuration for flake check
               fileSystems."/" = lib.mkForce {
                 device = "/dev/disk/by-label/nixos";
@@ -163,7 +163,7 @@
                 enable = true;
                 devices = [ "/dev/sda" ];
               };
-            }
+            })
           ];
         };
         # ... (similar for k3sControlImageConfig) ...
