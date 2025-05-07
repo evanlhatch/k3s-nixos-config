@@ -151,15 +151,15 @@
             { system.stateVersion = commonNodeArgumentsFromEnv.nixosStateVersion; }
             
             # Add dummy filesystem and boot loader configuration for flake check
-            {
+            { lib, ... }: {
               # Dummy filesystem configuration for flake check
-              fileSystems."/" = {
+              fileSystems."/" = lib.mkForce {
                 device = "/dev/disk/by-label/nixos";
                 fsType = "ext4";
               };
               
               # Dummy boot loader configuration for flake check
-              boot.loader.grub = {
+              boot.loader.grub = lib.mkForce {
                 enable = true;
                 devices = [ "/dev/sda" ];
               };
