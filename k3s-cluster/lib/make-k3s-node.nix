@@ -83,6 +83,24 @@ let
     commonConfigModule
     baseServerProfileModule
     { networking.hostName = hostname; } # Explicitly set hostname
+    
+    # Add dummy filesystem and boot loader configuration for flake check
+    {
+      # Dummy filesystem configuration for flake check
+      fileSystems."/" = {
+        device = "/dev/disk/by-label/nixos";
+        fsType = "ext4";
+      };
+      
+      # Dummy boot loader configuration for flake check
+      boot.loader.grub = {
+        enable = true;
+        devices = [ "/dev/sda" ];
+      };
+      
+      # Set state version
+      system.stateVersion = nixosStateVersion;
+    }
   ];
 
   # Add location module if applicable
