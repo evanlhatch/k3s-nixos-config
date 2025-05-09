@@ -75,6 +75,12 @@
 
     in
     {
+      # Add nixosModules output for nixos-everywhere.sh compatibility
+      nixosModules = {
+        # Add the hetznerK3sControlTemplate as a module
+        hetznerK3sControlTemplate = import ./module-wrapper.nix;
+      };
+
       nixosConfigurations = {
         # === TEMPLATES FOR nixos-everywhere.sh (USE INFISICAL FOR BOOTSTRAP SECRETS) ===
         "hetznerK3sWorkerTemplate" = makeK3sNode "x86_64-linux" {
