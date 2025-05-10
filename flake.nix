@@ -78,7 +78,7 @@
       # Add nixosModules output for nixos-everywhere.sh compatibility
       nixosModules = {
         # Add the hetznerK3sControlTemplate as a module
-        hetznerK3sControlTemplate = import ./module-wrapper.nix;
+        hetznerK3sControlTemplate = import ./nixos/hetzner/k3s-control-template;
       };
 
       nixosConfigurations = {
